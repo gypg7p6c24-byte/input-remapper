@@ -40,6 +40,7 @@ from evdev.ecodes import (
 import json
 import os
 import re
+import shutil
 import subprocess
 
 from gi.repository import Gtk, GtkSource, Gdk, GLib
@@ -744,7 +745,49 @@ class ActiveWindowWatcher:
         self._ticks = 0
         self._mode = os.environ.get("XDG_SESSION_TYPE", "").lower()
         logger.info("WINDOW_WATCHER started (poll=1000ms)")
+        if self._mode == "wayland":
+            self._ensure_gnome_extension()
         GLib.timeout_add(1000, self._poll)
+
+    def _ensure_gnome_extension(self):
+        uuid = "input-remapper-active-window@inputremapper"
+        source_dir = (
+            "/usr/share/input-remapper/gnome-extension/input-remapper-active-window"
+        )
+        target_dir = os.path.join(
+            os.path.expanduser("~"),
+            ".local",
+            "share",
+            "gnome-shell",
+            "extensions",
+            uuid,
+        )
+
+        if not os.path.isdir(source_dir):
+            logger.info("WINDOW_WATCHER extension source missing: %s", source_dir)
+            return
+
+        try:
+            os.makedirs(target_dir, exist_ok=True)
+            for filename in ("metadata.json", "extension.js"):
+                src = os.path.join(source_dir, filename)
+                dst = os.path.join(target_dir, filename)
+                if os.path.exists(src):
+                    shutil.copy2(src, dst)
+            logger.info("WINDOW_WATCHER extension installed to %s", target_dir)
+        except Exception as exc:
+            logger.info("WINDOW_WATCHER extension install failed: %s", exc)
+            return
+
+        try:
+            subprocess.check_output(
+                ["gnome-extensions", "enable", uuid],
+                stderr=subprocess.STDOUT,
+                text=True,
+            )
+            logger.info("WINDOW_WATCHER extension enabled")
+        except Exception as exc:
+            logger.info("WINDOW_WATCHER extension enable failed: %s", exc)
 
     def _poll(self):
         self._ticks += 1

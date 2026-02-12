@@ -32,6 +32,13 @@ def get_data_files() -> list[tuple[str, list[str]]]:
     return [
         # see development.md#files
         (DATA_DIR, glob.glob("data/*")),
+        (
+            f"{DATA_DIR}/gnome-extension/input-remapper-active-window",
+            [
+                "tools/gnome-extension/input-remapper-active-window/metadata.json",
+                "tools/gnome-extension/input-remapper-active-window/extension.js",
+            ],
+        ),
         ("usr/share/applications/", ["data/input-remapper-gtk.desktop"]),
         (
             "usr/share/metainfo/",
