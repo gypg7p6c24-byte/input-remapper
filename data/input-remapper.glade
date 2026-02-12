@@ -449,12 +449,6 @@ Shortcut: ctrl + del</property>
                         <property name="can-focus">True</property>
                         <property name="halign">start</property>
                         <property name="valign">center</property>
-                        <items>
-                          <item translatable="yes">Game 1</item>
-                          <item translatable="yes">Game 2</item>
-                          <item translatable="yes">Game 3</item>
-                          <item translatable="yes">Game 4</item>
-                        </items>
                       </object>
                       <packing>
                         <property name="left-attach">1</property>

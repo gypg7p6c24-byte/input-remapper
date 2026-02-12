@@ -58,7 +58,7 @@ from inputremapper.gui.messages.message_data import (
 from inputremapper.gui.utils import HandlerDisabled, Colors
 from inputremapper.injection.mapping_handlers.axis_transform import Transformation
 from inputremapper.input_event import InputEvent
-from inputremapper.utils import get_evdev_constant_name
+from inputremapper.utils import get_evdev_constant_name, get_steam_installed_games
 
 Capabilities = Dict[int, List]
 
@@ -673,6 +673,34 @@ class AutoloadSwitch:
 
     def _on_gtk_toggle(self, *_):
         self._controller.set_autoload(self._gui.get_active())
+
+
+class LinkGameDropdown:
+    """The dropdown used to select a Steam game to link the preset to."""
+
+    def __init__(self, message_broker: MessageBroker, gui: Gtk.ComboBoxText):
+        self._message_broker = message_broker
+        self._gui = gui
+
+        self._populate()
+        self._message_broker.subscribe(MessageType.init, self._on_init)
+
+    def _on_init(self, _):
+        self._populate()
+
+    def _populate(self):
+        self._gui.remove_all()
+
+        games = get_steam_installed_games()
+        if not games:
+            self._gui.append("none", _("No games found"))
+            self._gui.set_active_id("none")
+            return
+
+        for appid, name in games:
+            self._gui.append(appid, name)
+
+        self._gui.set_active(0)
 
 
 class ReleaseCombinationSwitch:

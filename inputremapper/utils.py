@@ -20,9 +20,11 @@
 
 """Utility functions."""
 
+import os
+import re
 import sys
 from hashlib import md5
-from typing import Optional, NewType
+from typing import Optional, NewType, Iterable, List, Tuple
 
 import evdev
 
@@ -62,3 +64,96 @@ def get_evdev_constant_name(type_: Optional[int], code: Optional[int], *_) -> st
         return "unknown"
 
     return name
+
+
+def _steam_roots() -> List[str]:
+    home = os.path.expanduser("~")
+    candidates = [
+        os.path.join(home, ".steam", "steam"),
+        os.path.join(home, ".steam", "root"),
+        os.path.join(home, ".local", "share", "Steam"),
+    ]
+    return [path for path in candidates if os.path.isdir(path)]
+
+
+def _unescape_vdf(value: str) -> str:
+    return value.replace("\\\\", "\\").replace('\\"', '"')
+
+
+def _parse_libraryfolders(path: str) -> Iterable[str]:
+    if not os.path.exists(path):
+        return []
+
+    try:
+        with open(path, "r", encoding="utf-8", errors="ignore") as file:
+            contents = file.read()
+    except OSError:
+        return []
+
+    paths = set()
+
+    # Newer format: "path" "/home/user/SteamLibrary"
+    for match in re.findall(r'"path"\s*"([^"]+)"', contents):
+        paths.add(_unescape_vdf(match))
+
+    # Older format: "0" "/home/user/SteamLibrary"
+    for match in re.findall(r'"\d+"\s*"([^"]+)"', contents):
+        if "/" in match:
+            paths.add(_unescape_vdf(match))
+
+    return paths
+
+
+def _steam_library_dirs() -> List[str]:
+    libraries = set()
+    for root in _steam_roots():
+        libraries.add(os.path.join(root, "steamapps"))
+        library_folders = os.path.join(root, "steamapps", "libraryfolders.vdf")
+        for lib_path in _parse_libraryfolders(library_folders):
+            libraries.add(os.path.join(os.path.expanduser(lib_path), "steamapps"))
+
+    return [path for path in libraries if os.path.isdir(path)]
+
+
+def _parse_appmanifest(path: str) -> Optional[Tuple[str, str]]:
+    try:
+        with open(path, "r", encoding="utf-8", errors="ignore") as file:
+            contents = file.read()
+    except OSError:
+        return None
+
+    name_match = re.search(r'"name"\s*"([^"]+)"', contents)
+    appid_match = re.search(r'"appid"\s*"(\d+)"', contents)
+    if not name_match:
+        return None
+
+    name = _unescape_vdf(name_match.group(1))
+    appid = appid_match.group(1) if appid_match else ""
+    return appid, name
+
+
+def get_steam_installed_games() -> List[Tuple[str, str]]:
+    """Return a list of (appid, name) for locally installed Steam games."""
+    games: dict[str, str] = {}
+    for library in _steam_library_dirs():
+        try:
+            entries = os.listdir(library)
+        except OSError:
+            continue
+
+        for entry in entries:
+            if not entry.startswith("appmanifest_") or not entry.endswith(".acf"):
+                continue
+
+            appid_from_name = entry[len("appmanifest_") : -len(".acf")]
+            manifest_path = os.path.join(library, entry)
+            parsed = _parse_appmanifest(manifest_path)
+            if parsed is None:
+                continue
+
+            appid, name = parsed
+            appid = appid or appid_from_name
+            if appid:
+                games[appid] = name
+
+    return sorted(games.items(), key=lambda item: item[1].lower())
