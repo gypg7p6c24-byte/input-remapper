@@ -763,6 +763,19 @@ class ActiveWindowWatcher:
             uuid,
         )
 
+        desktop = os.environ.get("XDG_CURRENT_DESKTOP", "")
+        session_desktop = os.environ.get("XDG_SESSION_DESKTOP", "")
+        session_mode = os.environ.get("GNOME_SHELL_SESSION_MODE", "")
+        logger.info(
+            "WINDOW_WATCHER env desktop=%s session_desktop=%s session_mode=%s",
+            desktop,
+            session_desktop,
+            session_mode,
+        )
+        if "gnome" not in desktop.lower() and "gnome" not in session_desktop.lower():
+            logger.info("WINDOW_WATCHER unsupported desktop for extension")
+            return
+
         if not os.path.isdir(source_dir):
             logger.info("WINDOW_WATCHER extension source missing: %s", source_dir)
             return
@@ -780,12 +793,42 @@ class ActiveWindowWatcher:
             return
 
         try:
+            version = subprocess.check_output(
+                ["gnome-extensions", "--version"],
+                stderr=subprocess.STDOUT,
+                text=True,
+            ).strip()
+            logger.info("WINDOW_WATCHER gnome-extensions version: %s", version)
+            enabled = subprocess.check_output(
+                ["gnome-extensions", "list", "--enabled"],
+                stderr=subprocess.STDOUT,
+                text=True,
+            ).strip()
+            logger.info("WINDOW_WATCHER extensions enabled: %s", enabled)
+        except subprocess.CalledProcessError as exc:
+            logger.info(
+                "WINDOW_WATCHER gnome-extensions probe failed: %s output=%s",
+                exc,
+                exc.output,
+            )
+        except FileNotFoundError:
+            logger.info("WINDOW_WATCHER gnome-extensions not found")
+        except Exception as exc:
+            logger.info("WINDOW_WATCHER gnome-extensions probe failed: %s", exc)
+
+        try:
             subprocess.check_output(
                 ["gnome-extensions", "enable", uuid],
                 stderr=subprocess.STDOUT,
                 text=True,
             )
             logger.info("WINDOW_WATCHER extension enabled")
+            enabled = subprocess.check_output(
+                ["gnome-extensions", "list", "--enabled"],
+                stderr=subprocess.STDOUT,
+                text=True,
+            ).strip()
+            logger.info("WINDOW_WATCHER extensions enabled: %s", enabled)
             info = subprocess.check_output(
                 ["gnome-extensions", "info", uuid],
                 stderr=subprocess.STDOUT,
