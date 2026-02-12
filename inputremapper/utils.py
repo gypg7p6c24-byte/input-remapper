@@ -27,6 +27,7 @@ from hashlib import md5
 from typing import Optional, NewType, Iterable, List, Tuple, Dict
 
 import evdev
+from inputremapper.logging.logger import logger
 
 DeviceHash = NewType("DeviceHash", str)
 
@@ -152,22 +153,58 @@ def _read_appinfo_types(path: str) -> Dict[str, str]:
     try:
         from steam.utils.appcache import parse_appinfo  # type: ignore
     except Exception:
+        logger.debug("steam module not available; cannot parse appinfo.vdf")
         return {}
 
     try:
         with open(path, "rb") as file:
-            appinfo = parse_appinfo(file.read())
-    except Exception:
+            blob = file.read()
+    except Exception as exc:
+        logger.debug('Failed to read appinfo.vdf "%s": %s', path, exc)
         return {}
 
+    logger.debug("appinfo.vdf path=%s bytes=%d", path, len(blob))
+
+    try:
+        appinfo = parse_appinfo(blob)
+    except Exception as exc:
+        logger.debug("parse_appinfo failed: %s", exc)
+        return {}
+
+    if not isinstance(appinfo, dict):
+        logger.debug("parse_appinfo returned non-dict: %s", type(appinfo))
+        return {}
+
+    logger.debug("parse_appinfo entries=%d", len(appinfo))
+
     types: Dict[str, str] = {}
+    missing_common = 0
+    missing_type = 0
     for appid, info in appinfo.items():
         try:
-            app_type = info.get("appinfo", {}).get("common", {}).get("type")
-        except Exception:
+            appinfo_block = info.get("appinfo", {})
+            common = appinfo_block.get("common", {})
+            app_type = common.get("type")
+        except Exception as exc:
+            logger.debug("appinfo entry parse failed appid=%s err=%s", appid, exc)
             app_type = None
+            common = None
+        if not common:
+            missing_common += 1
+        if not app_type:
+            missing_type += 1
         if app_type:
             types[str(appid)] = app_type
+
+    logger.debug(
+        "appinfo types=%d missing_common=%d missing_type=%d",
+        len(types),
+        missing_common,
+        missing_type,
+    )
+    if types:
+        sample = list(types.items())[:10]
+        logger.debug("appinfo sample types=%s", sample)
 
     return types
 
@@ -179,8 +216,13 @@ def get_steam_installed_games() -> List[Tuple[str, str]]:
     appinfo_path = _find_appinfo_path()
     if appinfo_path:
         appinfo_types = _read_appinfo_types(appinfo_path)
+    else:
+        logger.debug("No appinfo.vdf found in known Steam roots")
 
     library_dirs = _steam_library_dirs()
+    logger.debug("Steam library dirs: %s", library_dirs)
+    total_manifests = 0
+    filtered_by_type = 0
 
     for library in library_dirs:
         try:
@@ -191,6 +233,7 @@ def get_steam_installed_games() -> List[Tuple[str, str]]:
         for entry in entries:
             if not entry.startswith("appmanifest_") or not entry.endswith(".acf"):
                 continue
+            total_manifests += 1
 
             appid_from_name = entry[len("appmanifest_") : -len(".acf")]
             manifest_path = os.path.join(library, entry)
@@ -204,7 +247,14 @@ def get_steam_installed_games() -> List[Tuple[str, str]]:
                 if appinfo_types:
                     app_type = appinfo_types.get(appid)
                     if app_type != "game":
+                        filtered_by_type += 1
                         continue
                 games[appid] = name
 
+    logger.debug(
+        "Steam games: manifests=%d, filtered_non_game=%d, games=%d",
+        total_manifests,
+        filtered_by_type,
+        len(games),
+    )
     return sorted(games.items(), key=lambda item: item[1].lower())
