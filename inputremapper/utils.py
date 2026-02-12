@@ -29,6 +29,8 @@ from typing import Optional, NewType, Iterable, List, Tuple, Dict
 
 import evdev
 
+from inputremapper.logging.logger import logger
+
 DeviceHash = NewType("DeviceHash", str)
 
 
@@ -240,6 +242,7 @@ def _read_appinfo_types(path: str) -> Dict[str, str]:
         with open(path, "rb") as file:
             data = file.read()
     except OSError:
+        logger.debug('Failed to read appinfo.vdf at "%s"', path)
         return {}
 
     offset = 0
@@ -277,6 +280,9 @@ def _read_appinfo_types(path: str) -> Dict[str, str]:
         if app_type:
             types[str(appid)] = app_type
 
+    logger.debug(
+        "Parsed appinfo.vdf: %d app types found (path=%s)", len(types), path
+    )
     return types
 
 
@@ -287,8 +293,16 @@ def get_steam_installed_games() -> List[Tuple[str, str]]:
     appinfo_path = _find_appinfo_path()
     if appinfo_path:
         appinfo_types = _read_appinfo_types(appinfo_path)
+    else:
+        logger.debug("No appinfo.vdf found in known Steam roots")
 
-    for library in _steam_library_dirs():
+    library_dirs = _steam_library_dirs()
+    logger.debug("Steam library dirs: %s", library_dirs)
+
+    total_manifests = 0
+    filtered_by_type = 0
+
+    for library in library_dirs:
         try:
             entries = os.listdir(library)
         except OSError:
@@ -297,6 +311,7 @@ def get_steam_installed_games() -> List[Tuple[str, str]]:
         for entry in entries:
             if not entry.startswith("appmanifest_") or not entry.endswith(".acf"):
                 continue
+            total_manifests += 1
 
             appid_from_name = entry[len("appmanifest_") : -len(".acf")]
             manifest_path = os.path.join(library, entry)
@@ -310,7 +325,14 @@ def get_steam_installed_games() -> List[Tuple[str, str]]:
                 if appinfo_types:
                     app_type = appinfo_types.get(appid)
                     if app_type != "game":
+                        filtered_by_type += 1
                         continue
                 games[appid] = name
 
+    logger.debug(
+        "Steam games: manifests=%d, filtered_non_game=%d, games=%d",
+        total_manifests,
+        filtered_by_type,
+        len(games),
+    )
     return sorted(games.items(), key=lambda item: item[1].lower())
