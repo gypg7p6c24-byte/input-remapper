@@ -286,6 +286,19 @@ def _read_appinfo_types(path: str) -> Dict[str, str]:
     offset += 8
     types: Dict[str, str] = {}
 
+    lz4_available = False
+    try:
+        import lz4.block  # type: ignore
+
+        lz4_available = True
+    except Exception:
+        lz4_available = False
+
+    if not lz4_available:
+        logger.debug("lz4 not available; will not try to decompress appinfo entries")
+
+    decompressed_entries = 0
+
     while offset + 8 <= len(data):
         appid = struct.unpack_from("<I", data, offset)[0]
         offset += 4
@@ -328,12 +341,30 @@ def _read_appinfo_types(path: str) -> Dict[str, str]:
                     break
         if not app_type:
             app_type = _find_type_by_scan(kvdata)
+        if not app_type and lz4_available and data_size > 0:
+            try:
+                decompressed = lz4.block.decompress(kvdata, uncompressed_size=data_size)
+                decompressed_entries += 1
+                app_type, _ = _read_kv_object_find_common_type(decompressed, 0)
+                if not app_type:
+                    for common_offset in _find_common_offsets(decompressed):
+                        app_type, _ = _read_kv_object_find_type_in_common(
+                            decompressed, common_offset
+                        )
+                        if app_type:
+                            break
+                if not app_type:
+                    app_type = _find_type_by_scan(decompressed)
+            except Exception:
+                pass
         if app_type:
             types[str(appid)] = app_type
 
     logger.debug(
         "Parsed appinfo.vdf: %d app types found (path=%s)", len(types), path
     )
+    if decompressed_entries:
+        logger.debug("Decompressed %d appinfo entries via lz4", decompressed_entries)
     return types
 
 
