@@ -297,22 +297,37 @@ def _read_appinfo_types(path: str) -> Dict[str, str]:
         if size <= 0 or offset + size > len(data):
             break
 
-        entry = data[offset : offset + size]
-        offset += size
+        entry_start = offset
+        entry_end = offset + size
+        offset = entry_end
 
-        # appinfo entry header is 48 bytes before the keyvalues blob
-        kv_start = 48
-        if len(entry) <= kv_start:
+        # Parse appinfo entry header
+        if entry_end - entry_start < 40:
             continue
 
-        app_type, _ = _read_kv_object_find_common_type(entry, kv_start)
+        info_state = struct.unpack_from("<I", data, entry_start)[0]
+        last_updated = struct.unpack_from("<I", data, entry_start + 4)[0]
+        token = struct.unpack_from("<Q", data, entry_start + 8)[0]
+        _hash = data[entry_start + 16 : entry_start + 36]
+        change_number = struct.unpack_from("<I", data, entry_start + 36)[0]
+        data_size = struct.unpack_from("<I", data, entry_start + 40)[0]
+
+        kv_start = entry_start + 44
+        kv_end = kv_start + data_size
+        if kv_end > entry_end or data_size <= 0:
+            kv_start = entry_start
+            kv_end = entry_end
+
+        kvdata = data[kv_start:kv_end]
+
+        app_type, _ = _read_kv_object_find_common_type(kvdata, 0)
         if not app_type:
-            for common_offset in _find_common_offsets(entry):
-                app_type, _ = _read_kv_object_find_type_in_common(entry, common_offset)
+            for common_offset in _find_common_offsets(kvdata):
+                app_type, _ = _read_kv_object_find_type_in_common(kvdata, common_offset)
                 if app_type:
                     break
         if not app_type:
-            app_type = _find_type_by_scan(entry)
+            app_type = _find_type_by_scan(kvdata)
         if app_type:
             types[str(appid)] = app_type
 
