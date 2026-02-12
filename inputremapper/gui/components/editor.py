@@ -56,6 +56,7 @@ from inputremapper.gui.messages.message_data import (
     CombinationUpdate,
 )
 from inputremapper.gui.utils import HandlerDisabled, Colors
+from inputremapper.logging.logger import logger
 from inputremapper.injection.mapping_handlers.axis_transform import Transformation
 from inputremapper.input_event import InputEvent
 from inputremapper.utils import get_evdev_constant_name, get_steam_installed_games
