@@ -140,9 +140,13 @@ def _parse_appmanifest(path: str) -> Optional[Tuple[str, str]]:
 
 def _find_appinfo_path() -> Optional[str]:
     for root in _steam_roots():
-        candidate = os.path.join(root, "steamapps", "appinfo.vdf")
-        if os.path.exists(candidate):
-            return candidate
+        candidates = [
+            os.path.join(root, "appinfo.vdf"),
+            os.path.join(root, "steamapps", "appinfo.vdf"),
+        ]
+        for candidate in candidates:
+            if os.path.exists(candidate):
+                return candidate
     return None
 
 
