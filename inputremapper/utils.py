@@ -23,12 +23,10 @@
 import os
 import re
 import sys
-import io
 from hashlib import md5
 from typing import Optional, NewType, Iterable, List, Tuple, Dict
 
 import evdev
-from inputremapper.logging.logger import logger
 
 DeviceHash = NewType("DeviceHash", str)
 
@@ -137,141 +135,11 @@ def _parse_appmanifest(path: str) -> Optional[Tuple[str, str]]:
     return appid, name
 
 
-def _find_appinfo_path() -> Optional[str]:
-    for root in _steam_roots():
-        candidates = [
-            os.path.join(root, "appinfo.vdf"),
-            os.path.join(root, "appcache", "appinfo.vdf"),
-            os.path.join(root, "steamapps", "appinfo.vdf"),
-        ]
-        for candidate in candidates:
-            if os.path.exists(candidate):
-                return candidate
-    return None
-
-
-def _read_appinfo_types(path: str) -> Dict[str, str]:
-    try:
-        with open(path, "rb") as file:
-            blob = file.read()
-    except Exception as exc:
-        logger.debug('Failed to read appinfo.vdf "%s": %s', path, exc)
-        return {}
-
-    logger.debug("appinfo.vdf path=%s bytes=%d", path, len(blob))
-
-    types: Dict[str, str] = {}
-
-    # 1) Try steamfiles (supports newer appinfo formats)
-    try:
-        from steamfiles import appinfo as steamfiles_appinfo  # type: ignore
-
-        logger.debug("appinfo parser=steamfiles")
-        with open(path, "rb") as file:
-            appinfo_data = steamfiles_appinfo.load(file)
-
-        logger.debug("steamfiles entries=%d", len(appinfo_data))
-
-        missing_common = 0
-        missing_type = 0
-        sample_logged = 0
-
-        for appid, entry in appinfo_data.items():
-            # entry likely contains metadata + 'data' blob
-            data_block = entry.get("data", entry)
-            appinfo_block = data_block.get("appinfo", data_block)
-            common = appinfo_block.get("common", {})
-            app_type = common.get("type")
-
-            if not common:
-                missing_common += 1
-            if not app_type:
-                missing_type += 1
-
-            if app_type:
-                types[str(appid)] = app_type
-                if sample_logged < 5:
-                    logger.debug(
-                        "steamfiles type appid=%s name=%s type=%s",
-                        appid,
-                        common.get("name"),
-                        app_type,
-                    )
-                    sample_logged += 1
-
-        logger.debug(
-            "steamfiles types=%d missing_common=%d missing_type=%d",
-            len(types),
-            missing_common,
-            missing_type,
-        )
-
-        if types:
-            return types
-    except Exception as exc:
-        logger.debug("steamfiles parse failed: %s", exc)
-
-    # 2) Try steam (older appcache parser)
-    try:
-        from steam.utils.appcache import parse_appinfo  # type: ignore
-
-        logger.debug("appinfo parser=steam")
-        header, apps = parse_appinfo(io.BytesIO(blob))
-        logger.debug("steam header=%s", header)
-
-        missing_common = 0
-        missing_type = 0
-        sample_logged = 0
-
-        for entry in apps:
-            appid = entry.get("appid")
-            data_block = entry.get("data", {})
-            appinfo_block = data_block.get("appinfo", {})
-            common = appinfo_block.get("common", {})
-            app_type = common.get("type")
-
-            if not common:
-                missing_common += 1
-            if not app_type:
-                missing_type += 1
-
-            if appid is not None and app_type:
-                types[str(appid)] = app_type
-                if sample_logged < 5:
-                    logger.debug(
-                        "steam type appid=%s name=%s type=%s",
-                        appid,
-                        common.get("name"),
-                        app_type,
-                    )
-                    sample_logged += 1
-
-        logger.debug(
-            "steam types=%d missing_common=%d missing_type=%d",
-            len(types),
-            missing_common,
-            missing_type,
-        )
-    except Exception as exc:
-        logger.debug("steam parse failed: %s", exc)
-
-    return types
-
-
 def get_steam_installed_games() -> List[Tuple[str, str]]:
     """Return a list of (appid, name) for locally installed Steam games."""
     games: dict[str, str] = {}
-    appinfo_types: Dict[str, str] = {}
-    appinfo_path = _find_appinfo_path()
-    if appinfo_path:
-        appinfo_types = _read_appinfo_types(appinfo_path)
-    else:
-        logger.debug("No appinfo.vdf found in known Steam roots")
 
     library_dirs = _steam_library_dirs()
-    logger.debug("Steam library dirs: %s", library_dirs)
-    total_manifests = 0
-    filtered_by_type = 0
 
     for library in library_dirs:
         try:
@@ -282,7 +150,6 @@ def get_steam_installed_games() -> List[Tuple[str, str]]:
         for entry in entries:
             if not entry.startswith("appmanifest_") or not entry.endswith(".acf"):
                 continue
-            total_manifests += 1
 
             appid_from_name = entry[len("appmanifest_") : -len(".acf")]
             manifest_path = os.path.join(library, entry)
@@ -293,23 +160,6 @@ def get_steam_installed_games() -> List[Tuple[str, str]]:
             appid, name = parsed
             appid = appid or appid_from_name
             if appid:
-                if appinfo_types:
-                    app_type = appinfo_types.get(appid)
-                    logger.debug(
-                        "manifest appid=%s name=%s appinfo_type=%s",
-                        appid,
-                        name,
-                        app_type,
-                    )
-                    if app_type != "game":
-                        filtered_by_type += 1
-                        continue
                 games[appid] = name
 
-    logger.debug(
-        "Steam games: manifests=%d, filtered_non_game=%d, games=%d",
-        total_manifests,
-        filtered_by_type,
-        len(games),
-    )
     return sorted(games.items(), key=lambda item: item[1].lower())

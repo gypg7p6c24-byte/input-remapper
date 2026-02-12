@@ -35,14 +35,6 @@ def check_dependencies() -> None:
         import dasbus
         import pygobject
         import pydantic
-        try:
-            import steamfiles  # type: ignore
-        except Exception:
-            print(
-                "\033[93mOptional Python module missing: steamfiles "
-                "(install via pip for Steam game filtering)\033[0m"
-            )
-
         print("All required Python modules found")
     except ImportError as e:
         print(f"\033[93mMissing Python module: {e}\033[0m")
