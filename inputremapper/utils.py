@@ -22,9 +22,10 @@
 
 import os
 import re
+import struct
 import sys
 from hashlib import md5
-from typing import Optional, NewType, Iterable, List, Tuple
+from typing import Optional, NewType, Iterable, List, Tuple, Dict
 
 import evdev
 
@@ -135,9 +136,138 @@ def _parse_appmanifest(path: str) -> Optional[Tuple[str, str]]:
     return appid, name
 
 
+def _find_appinfo_path() -> Optional[str]:
+    for root in _steam_roots():
+        candidate = os.path.join(root, "steamapps", "appinfo.vdf")
+        if os.path.exists(candidate):
+            return candidate
+    return None
+
+
+def _read_cstring(data: bytes, offset: int) -> Tuple[str, int]:
+    end = data.find(b"\x00", offset)
+    if end == -1:
+        return "", len(data)
+    value = data[offset:end].decode("utf-8", errors="ignore")
+    return value, end + 1
+
+
+def _skip_wstring(data: bytes, offset: int) -> int:
+    # UTF-16LE null-terminated
+    while offset + 1 < len(data):
+        if data[offset : offset + 2] == b"\x00\x00":
+            return offset + 2
+        offset += 2
+    return len(data)
+
+
+def _read_kv_object_find_common_type(data: bytes, offset: int) -> Tuple[Optional[str], int]:
+    while offset < len(data):
+        key_type = data[offset]
+        offset += 1
+        if key_type == 0x08:
+            return None, offset
+
+        key, offset = _read_cstring(data, offset)
+
+        if key_type == 0x00:
+            if key == "common":
+                common_type, offset = _read_kv_object_find_type_in_common(data, offset)
+                return common_type, offset
+            _, offset = _read_kv_object_find_common_type(data, offset)
+            continue
+
+        if key_type == 0x01:
+            _, offset = _read_cstring(data, offset)
+        elif key_type in (0x02, 0x03, 0x04, 0x06):
+            offset += 4
+        elif key_type == 0x05:
+            offset = _skip_wstring(data, offset)
+        elif key_type == 0x07:
+            offset += 8
+        else:
+            return None, len(data)
+
+    return None, offset
+
+
+def _read_kv_object_find_type_in_common(data: bytes, offset: int) -> Tuple[Optional[str], int]:
+    while offset < len(data):
+        key_type = data[offset]
+        offset += 1
+        if key_type == 0x08:
+            return None, offset
+
+        key, offset = _read_cstring(data, offset)
+
+        if key_type == 0x00:
+            _, offset = _read_kv_object_find_type_in_common(data, offset)
+            continue
+
+        if key_type == 0x01:
+            value, offset = _read_cstring(data, offset)
+            if key == "type":
+                return value, offset
+        elif key_type in (0x02, 0x03, 0x04, 0x06):
+            offset += 4
+        elif key_type == 0x05:
+            offset = _skip_wstring(data, offset)
+        elif key_type == 0x07:
+            offset += 8
+        else:
+            return None, len(data)
+
+    return None, offset
+
+
+def _read_appinfo_types(path: str) -> Dict[str, str]:
+    try:
+        with open(path, "rb") as file:
+            data = file.read()
+    except OSError:
+        return {}
+
+    offset = 0
+    if len(data) < 8:
+        return {}
+
+    # skip header magic + universe
+    offset += 8
+    types: Dict[str, str] = {}
+
+    while offset + 8 <= len(data):
+        appid = struct.unpack_from("<I", data, offset)[0]
+        offset += 4
+        if appid == 0:
+            break
+
+        size = struct.unpack_from("<I", data, offset)[0]
+        offset += 4
+        if size <= 0 or offset + size > len(data):
+            break
+
+        entry = data[offset : offset + size]
+        offset += size
+
+        if len(entry) <= 40:
+            continue
+
+        kv_start = 40
+        app_type, _ = _read_kv_object_find_common_type(entry, kv_start)
+        if app_type:
+            types[str(appid)] = app_type
+
+    return types
+
+
 def get_steam_installed_games() -> List[Tuple[str, str]]:
     """Return a list of (appid, name) for locally installed Steam games."""
     games: dict[str, str] = {}
+    appinfo_types: Dict[str, str] = {}
+    appinfo_path = _find_appinfo_path()
+    if appinfo_path:
+        appinfo_types = _read_appinfo_types(appinfo_path)
+
     for library in _steam_library_dirs():
         try:
             entries = os.listdir(library)
@@ -157,6 +287,10 @@ def get_steam_installed_games() -> List[Tuple[str, str]]:
             appid, name = parsed
             appid = appid or appid_from_name
             if appid:
+                if appinfo_types:
+                    app_type = appinfo_types.get(appid)
+                    if app_type != "game":
+                        continue
                 games[appid] = name
 
     return sorted(games.items(), key=lambda item: item[1].lower())
