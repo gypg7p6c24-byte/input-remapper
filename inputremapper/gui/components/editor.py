@@ -776,6 +776,11 @@ class ActiveWindowWatcher:
             logger.info("WINDOW_WATCHER unsupported desktop for extension")
             return
 
+        logger.info(
+            "WINDOW_WATCHER extension source_dir=%s exists=%s",
+            source_dir,
+            os.path.isdir(source_dir),
+        )
         if not os.path.isdir(source_dir):
             logger.info("WINDOW_WATCHER extension source missing: %s", source_dir)
             return
@@ -787,7 +792,14 @@ class ActiveWindowWatcher:
                 dst = os.path.join(target_dir, filename)
                 if os.path.exists(src):
                     shutil.copy2(src, dst)
-            logger.info("WINDOW_WATCHER extension installed to %s", target_dir)
+            meta_path = os.path.join(target_dir, "metadata.json")
+            ext_path = os.path.join(target_dir, "extension.js")
+            logger.info(
+                "WINDOW_WATCHER extension installed to %s meta=%s ext=%s",
+                target_dir,
+                os.path.exists(meta_path),
+                os.path.exists(ext_path),
+            )
         except Exception as exc:
             logger.info("WINDOW_WATCHER extension install failed: %s", exc)
             return
@@ -805,6 +817,12 @@ class ActiveWindowWatcher:
                 text=True,
             ).strip()
             logger.info("WINDOW_WATCHER extensions enabled: %s", enabled)
+            available = subprocess.check_output(
+                ["gnome-extensions", "list"],
+                stderr=subprocess.STDOUT,
+                text=True,
+            ).strip()
+            logger.info("WINDOW_WATCHER extensions available: %s", available)
         except subprocess.CalledProcessError as exc:
             logger.info(
                 "WINDOW_WATCHER gnome-extensions probe failed: %s output=%s",
