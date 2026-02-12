@@ -272,10 +272,11 @@ def _read_appinfo_types(path: str) -> Dict[str, str]:
         entry = data[offset : offset + size]
         offset += size
 
-        if len(entry) <= 40:
+        # appinfo entry header is 48 bytes before the keyvalues blob
+        kv_start = 48
+        if len(entry) <= kv_start:
             continue
 
-        kv_start = 40
         app_type, _ = _read_kv_object_find_common_type(entry, kv_start)
         if not app_type:
             for common_offset in _find_common_offsets(entry):
