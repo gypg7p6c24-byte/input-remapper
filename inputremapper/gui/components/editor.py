@@ -37,6 +37,11 @@ from evdev.ecodes import (
     BTN_EXTRA,
     BTN_SIDE,
 )
+import json
+import os
+import re
+import subprocess
+
 from gi.repository import Gtk, GtkSource, Gdk, GLib
 
 from inputremapper.configs.input_config import InputCombination, InputConfig
@@ -737,11 +742,17 @@ class ActiveWindowWatcher:
     def __init__(self):
         self._last = None
         self._ticks = 0
+        self._mode = os.environ.get("XDG_SESSION_TYPE", "").lower()
         logger.info("WINDOW_WATCHER started (poll=1000ms)")
         GLib.timeout_add(1000, self._poll)
 
     def _poll(self):
         self._ticks += 1
+        if self._mode == "wayland":
+            return self._poll_wayland()
+        return self._poll_x11()
+
+    def _poll_x11(self):
         display = Gdk.Display.get_default()
         screen = Gdk.Screen.get_default()
         if not display or not screen:
@@ -779,6 +790,103 @@ class ActiveWindowWatcher:
                 title,
                 wm_class,
                 xid,
+            )
+
+        return True
+
+    def _poll_wayland(self):
+        payload = (
+            "(function(){"
+            "let w=null;"
+            "let actors=global.get_window_actors();"
+            "for (let i=0;i<actors.length;i++){"
+            "  let mw=actors[i].get_meta_window();"
+            "  if (mw && (mw.has_focus && mw.has_focus())){ w=mw; break; }"
+            "}"
+            "if (!w && global.display && global.display.get_focus_window){"
+            "  try { w = global.display.get_focus_window(); } catch(e) {}"
+            "}"
+            "if (!w){ return ''; }"
+            "let data={"
+            " title: w.get_title ? w.get_title() : '',"
+            " wm_class: w.get_wm_class ? w.get_wm_class() : '',"
+            " app_id: w.get_gtk_application_id ? w.get_gtk_application_id() : '',"
+            " pid: w.get_pid ? w.get_pid() : 0"
+            "};"
+            "return JSON.stringify(data);"
+            "})()"
+        )
+
+        try:
+            result = subprocess.check_output(
+                [
+                    "gdbus",
+                    "call",
+                    "--session",
+                    "--dest",
+                    "org.gnome.Shell",
+                    "--object-path",
+                    "/org/gnome/Shell",
+                    "--method",
+                    "org.gnome.Shell.Eval",
+                    payload,
+                ],
+                stderr=subprocess.STDOUT,
+                text=True,
+            ).strip()
+        except Exception as exc:
+            if self._ticks % 10 == 0:
+                logger.info("WINDOW_WATCHER heartbeat (gdbus error=%s)", exc)
+            return True
+
+        # gdbus output looks like: (true, '...') or (false, 'error')
+        match = re.match(r"^\((true|false),\s*'(.*)'\)$", result)
+        if not match:
+            if self._ticks % 10 == 0:
+                logger.info("WINDOW_WATCHER heartbeat (gdbus output=%s)", result)
+            return True
+
+        ok = match.group(1) == "true"
+        payload_str = match.group(2).encode("utf-8").decode("unicode_escape")
+        if not ok:
+            if self._ticks % 10 == 0:
+                logger.info("WINDOW_WATCHER heartbeat (Eval denied)")
+            return True
+
+        if not payload_str:
+            if self._ticks % 10 == 0:
+                logger.info("WINDOW_WATCHER heartbeat (no active window)")
+            return True
+
+        try:
+            data = json.loads(payload_str)
+        except Exception:
+            if self._ticks % 10 == 0:
+                logger.info("WINDOW_WATCHER heartbeat (bad json=%s)", payload_str)
+            return True
+
+        title = data.get("title", "")
+        wm_class = data.get("wm_class", "")
+        app_id = data.get("app_id", "")
+        pid = data.get("pid", 0)
+
+        current = (title, wm_class, app_id, pid)
+        if current != self._last:
+            self._last = current
+            logger.info(
+                "WINDOW_WATCHER change title=%s wm_class=%s app_id=%s pid=%s",
+                title,
+                wm_class,
+                app_id,
+                pid,
+            )
+        elif self._ticks % 10 == 0:
+            logger.info(
+                "WINDOW_WATCHER heartbeat title=%s wm_class=%s app_id=%s pid=%s",
+                title,
+                wm_class,
+                app_id,
+                pid,
             )
 
         return True
