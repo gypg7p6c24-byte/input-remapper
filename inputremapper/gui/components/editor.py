@@ -735,16 +735,23 @@ class ActiveWindowWatcher:
 
     def __init__(self):
         self._last = None
+        self._ticks = 0
+        logger.info("WINDOW_WATCHER started (poll=1000ms)")
         GLib.timeout_add(1000, self._poll)
 
     def _poll(self):
+        self._ticks += 1
         display = Gdk.Display.get_default()
         screen = Gdk.Screen.get_default()
         if not display or not screen:
+            if self._ticks % 10 == 0:
+                logger.info("WINDOW_WATCHER heartbeat (no display/screen)")
             return True
 
         window = screen.get_active_window()
         if window is None:
+            if self._ticks % 10 == 0:
+                logger.info("WINDOW_WATCHER heartbeat (no active window)")
             return True
 
         title = window.get_title() or ""
@@ -759,8 +766,15 @@ class ActiveWindowWatcher:
         current = (title, wm_class, xid)
         if current != self._last:
             self._last = current
-            logger.debug(
-                "Active window changed: title=%s wm_class=%s xid=%s",
+            logger.info(
+                "WINDOW_WATCHER change title=%s wm_class=%s xid=%s",
+                title,
+                wm_class,
+                xid,
+            )
+        elif self._ticks % 10 == 0:
+            logger.info(
+                "WINDOW_WATCHER heartbeat title=%s wm_class=%s xid=%s",
                 title,
                 wm_class,
                 xid,
