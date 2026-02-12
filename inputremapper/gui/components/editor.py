@@ -786,6 +786,18 @@ class ActiveWindowWatcher:
                 text=True,
             )
             logger.info("WINDOW_WATCHER extension enabled")
+            info = subprocess.check_output(
+                ["gnome-extensions", "info", uuid],
+                stderr=subprocess.STDOUT,
+                text=True,
+            ).strip()
+            logger.info("WINDOW_WATCHER extension info: %s", info)
+        except subprocess.CalledProcessError as exc:
+            logger.info(
+                "WINDOW_WATCHER extension enable failed: %s output=%s",
+                exc,
+                exc.output,
+            )
         except Exception as exc:
             logger.info("WINDOW_WATCHER extension enable failed: %s", exc)
 
@@ -854,11 +866,17 @@ class ActiveWindowWatcher:
                 stderr=subprocess.STDOUT,
                 text=True,
             ).strip()
-        except Exception as exc:
+        except subprocess.CalledProcessError as exc:
             if self._ticks % 10 == 0:
                 logger.info(
-                    "WINDOW_WATCHER heartbeat (extension error=%s)", exc
+                    "WINDOW_WATCHER heartbeat (extension error=%s output=%s)",
+                    exc,
+                    exc.output,
                 )
+            return True
+        except Exception as exc:
+            if self._ticks % 10 == 0:
+                logger.info("WINDOW_WATCHER heartbeat (extension error=%s)", exc)
             return True
 
         match = re.match(r"^\('(.*)'\)$", result)
