@@ -161,7 +161,9 @@ def _skip_wstring(data: bytes, offset: int) -> int:
     return len(data)
 
 
-def _read_kv_object_find_common_type(data: bytes, offset: int) -> Tuple[Optional[str], int]:
+def _read_kv_object_find_common_type(
+    data: bytes, offset: int
+) -> Tuple[Optional[str], int]:
     while offset < len(data):
         key_type = data[offset]
         offset += 1
@@ -220,6 +222,19 @@ def _read_kv_object_find_type_in_common(data: bytes, offset: int) -> Tuple[Optio
     return None, offset
 
 
+def _find_common_offsets(data: bytes) -> List[int]:
+    offsets: List[int] = []
+    marker = b"\x00common\x00"
+    start = 0
+    while True:
+        idx = data.find(marker, start)
+        if idx == -1:
+            break
+        offsets.append(idx + len(marker))
+        start = idx + 1
+    return offsets
+
+
 def _read_appinfo_types(path: str) -> Dict[str, str]:
     try:
         with open(path, "rb") as file:
@@ -254,6 +269,11 @@ def _read_appinfo_types(path: str) -> Dict[str, str]:
 
         kv_start = 40
         app_type, _ = _read_kv_object_find_common_type(entry, kv_start)
+        if not app_type:
+            for common_offset in _find_common_offsets(entry):
+                app_type, _ = _read_kv_object_find_type_in_common(entry, common_offset)
+                if app_type:
+                    break
         if app_type:
             types[str(appid)] = app_type
 
