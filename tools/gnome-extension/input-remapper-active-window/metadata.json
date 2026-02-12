@@ -1,0 +1,7 @@
+{
+  "uuid": "input-remapper-active-window@inputremapper",
+  "name": "Input Remapper Active Window",
+  "description": "Expose active window details over DBus for Input Remapper (Wayland).",
+  "shell-version": ["45", "46", "47"],
+  "version": 1
+}
