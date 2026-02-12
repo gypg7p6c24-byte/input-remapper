@@ -72,6 +72,9 @@ def _steam_roots() -> List[str]:
         os.path.join(home, ".steam", "steam"),
         os.path.join(home, ".steam", "root"),
         os.path.join(home, ".local", "share", "Steam"),
+        # Snap installs
+        os.path.join(home, "snap", "steam", "common", ".steam", "steam"),
+        os.path.join(home, "snap", "steam", "common", ".local", "share", "Steam"),
     ]
     return [path for path in candidates if os.path.isdir(path)]
 
