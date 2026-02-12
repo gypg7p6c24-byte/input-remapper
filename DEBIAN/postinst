@@ -15,3 +15,9 @@ if [ -d "/run/systemd/system/" ]; then
   systemctl enable input-remapper
   systemctl start input-remapper
 fi
+
+# Optional dependency for Steam appinfo parsing
+if ! /usr/bin/python3 -c "import steam" >/dev/null 2>&1; then
+  echo "Installing python module 'steam' for Steam game filtering..."
+  /usr/bin/python3 -m pip install --break-system-packages steam >/dev/null 2>&1 || true
+fi

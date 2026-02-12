@@ -22,14 +22,11 @@
 
 import os
 import re
-import struct
 import sys
 from hashlib import md5
 from typing import Optional, NewType, Iterable, List, Tuple, Dict
 
 import evdev
-
-from inputremapper.logging.logger import logger
 
 DeviceHash = NewType("DeviceHash", str)
 
@@ -151,220 +148,27 @@ def _find_appinfo_path() -> Optional[str]:
     return None
 
 
-def _read_cstring(data: bytes, offset: int) -> Tuple[str, int]:
-    end = data.find(b"\x00", offset)
-    if end == -1:
-        return "", len(data)
-    value = data[offset:end].decode("utf-8", errors="ignore")
-    return value, end + 1
-
-
-def _skip_wstring(data: bytes, offset: int) -> int:
-    # UTF-16LE null-terminated
-    while offset + 1 < len(data):
-        if data[offset : offset + 2] == b"\x00\x00":
-            return offset + 2
-        offset += 2
-    return len(data)
-
-
-def _read_kv_object_find_common_type(
-    data: bytes, offset: int
-) -> Tuple[Optional[str], int]:
-    while offset < len(data):
-        key_type = data[offset]
-        offset += 1
-        if key_type == 0x08:
-            return None, offset
-
-        key, offset = _read_cstring(data, offset)
-
-        if key_type == 0x00:
-            if key == "common":
-                common_type, offset = _read_kv_object_find_type_in_common(data, offset)
-                return common_type, offset
-            _, offset = _read_kv_object_find_common_type(data, offset)
-            continue
-
-        if key_type == 0x01:
-            _, offset = _read_cstring(data, offset)
-        elif key_type in (0x02, 0x03, 0x04, 0x06):
-            offset += 4
-        elif key_type == 0x05:
-            offset = _skip_wstring(data, offset)
-        elif key_type == 0x07:
-            offset += 8
-        else:
-            return None, len(data)
-
-    return None, offset
-
-
-def _read_kv_object_find_type_in_common(data: bytes, offset: int) -> Tuple[Optional[str], int]:
-    while offset < len(data):
-        key_type = data[offset]
-        offset += 1
-        if key_type == 0x08:
-            return None, offset
-
-        key, offset = _read_cstring(data, offset)
-
-        if key_type == 0x00:
-            _, offset = _read_kv_object_find_type_in_common(data, offset)
-            continue
-
-        if key_type == 0x01:
-            value, offset = _read_cstring(data, offset)
-            if key == "type":
-                return value, offset
-        elif key_type in (0x02, 0x03, 0x04, 0x06):
-            offset += 4
-        elif key_type == 0x05:
-            offset = _skip_wstring(data, offset)
-        elif key_type == 0x07:
-            offset += 8
-        else:
-            return None, len(data)
-
-    return None, offset
-
-
-def _find_common_offsets(data: bytes) -> List[int]:
-    offsets: List[int] = []
-    marker = b"\x00common\x00"
-    start = 0
-    while True:
-        idx = data.find(marker, start)
-        if idx == -1:
-            break
-        offsets.append(idx + len(marker))
-        start = idx + 1
-    return offsets
-
-
-def _find_type_by_scan(entry: bytes) -> Optional[str]:
-    common_idx = entry.find(b"\x00common\x00")
-    if common_idx == -1:
-        return None
-
-    # Look ahead for a string type key in the common block.
-    scan_start = common_idx + len(b"\x00common\x00")
-    scan_end = min(len(entry), scan_start + 8192)
-    type_marker = b"\x01type\x00"
-    idx = entry.find(type_marker, scan_start, scan_end)
-    if idx == -1:
-        return None
-
-    value_start = idx + len(type_marker)
-    value, _ = _read_cstring(entry, value_start)
-    return value or None
-
-
 def _read_appinfo_types(path: str) -> Dict[str, str]:
     try:
-        with open(path, "rb") as file:
-            data = file.read()
-    except OSError:
-        logger.debug('Failed to read appinfo.vdf at "%s"', path)
-        return {}
-
-    offset = 0
-    if len(data) < 8:
-        return {}
-
-    common_marker = b"\x00common\x00"
-    common_count = data.count(common_marker)
-    header_hex = data[:16].hex()
-    logger.debug(
-        "appinfo.vdf header=%s len=%d common_markers=%d",
-        header_hex,
-        len(data),
-        common_count,
-    )
-
-    # skip header magic + universe
-    offset += 8
-    types: Dict[str, str] = {}
-
-    lz4_available = False
-    try:
-        import lz4.block  # type: ignore
-
-        lz4_available = True
+        from steam.utils.appcache import parse_appinfo  # type: ignore
     except Exception:
-        lz4_available = False
+        return {}
 
-    if not lz4_available:
-        logger.debug("lz4 not available; will not try to decompress appinfo entries")
+    try:
+        with open(path, "rb") as file:
+            appinfo = parse_appinfo(file.read())
+    except Exception:
+        return {}
 
-    decompressed_entries = 0
-
-    while offset + 8 <= len(data):
-        appid = struct.unpack_from("<I", data, offset)[0]
-        offset += 4
-        if appid == 0:
-            break
-
-        size = struct.unpack_from("<I", data, offset)[0]
-        offset += 4
-        if size <= 0 or offset + size > len(data):
-            break
-
-        entry_start = offset
-        entry_end = offset + size
-        offset = entry_end
-
-        # Parse appinfo entry header
-        if entry_end - entry_start < 40:
-            continue
-
-        info_state = struct.unpack_from("<I", data, entry_start)[0]
-        last_updated = struct.unpack_from("<I", data, entry_start + 4)[0]
-        token = struct.unpack_from("<Q", data, entry_start + 8)[0]
-        _hash = data[entry_start + 16 : entry_start + 36]
-        change_number = struct.unpack_from("<I", data, entry_start + 36)[0]
-        data_size = struct.unpack_from("<I", data, entry_start + 40)[0]
-
-        kv_start = entry_start + 44
-        kv_end = kv_start + data_size
-        if kv_end > entry_end or data_size <= 0:
-            kv_start = entry_start
-            kv_end = entry_end
-
-        kvdata = data[kv_start:kv_end]
-
-        app_type, _ = _read_kv_object_find_common_type(kvdata, 0)
-        if not app_type:
-            for common_offset in _find_common_offsets(kvdata):
-                app_type, _ = _read_kv_object_find_type_in_common(kvdata, common_offset)
-                if app_type:
-                    break
-        if not app_type:
-            app_type = _find_type_by_scan(kvdata)
-        if not app_type and lz4_available and data_size > 0:
-            try:
-                decompressed = lz4.block.decompress(kvdata, uncompressed_size=data_size)
-                decompressed_entries += 1
-                app_type, _ = _read_kv_object_find_common_type(decompressed, 0)
-                if not app_type:
-                    for common_offset in _find_common_offsets(decompressed):
-                        app_type, _ = _read_kv_object_find_type_in_common(
-                            decompressed, common_offset
-                        )
-                        if app_type:
-                            break
-                if not app_type:
-                    app_type = _find_type_by_scan(decompressed)
-            except Exception:
-                pass
+    types: Dict[str, str] = {}
+    for appid, info in appinfo.items():
+        try:
+            app_type = info.get("appinfo", {}).get("common", {}).get("type")
+        except Exception:
+            app_type = None
         if app_type:
             types[str(appid)] = app_type
 
-    logger.debug(
-        "Parsed appinfo.vdf: %d app types found (path=%s)", len(types), path
-    )
-    if decompressed_entries:
-        logger.debug("Decompressed %d appinfo entries via lz4", decompressed_entries)
     return types
 
 
@@ -375,14 +179,8 @@ def get_steam_installed_games() -> List[Tuple[str, str]]:
     appinfo_path = _find_appinfo_path()
     if appinfo_path:
         appinfo_types = _read_appinfo_types(appinfo_path)
-    else:
-        logger.debug("No appinfo.vdf found in known Steam roots")
 
     library_dirs = _steam_library_dirs()
-    logger.debug("Steam library dirs: %s", library_dirs)
-
-    total_manifests = 0
-    filtered_by_type = 0
 
     for library in library_dirs:
         try:
@@ -393,7 +191,6 @@ def get_steam_installed_games() -> List[Tuple[str, str]]:
         for entry in entries:
             if not entry.startswith("appmanifest_") or not entry.endswith(".acf"):
                 continue
-            total_manifests += 1
 
             appid_from_name = entry[len("appmanifest_") : -len(".acf")]
             manifest_path = os.path.join(library, entry)
@@ -407,14 +204,7 @@ def get_steam_installed_games() -> List[Tuple[str, str]]:
                 if appinfo_types:
                     app_type = appinfo_types.get(appid)
                     if app_type != "game":
-                        filtered_by_type += 1
                         continue
                 games[appid] = name
 
-    logger.debug(
-        "Steam games: manifests=%d, filtered_non_game=%d, games=%d",
-        total_manifests,
-        filtered_by_type,
-        len(games),
-    )
     return sorted(games.items(), key=lambda item: item[1].lower())
