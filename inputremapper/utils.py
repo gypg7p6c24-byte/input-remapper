@@ -23,6 +23,7 @@
 import os
 import re
 import sys
+import io
 from hashlib import md5
 from typing import Optional, NewType, Iterable, List, Tuple, Dict
 
@@ -166,7 +167,8 @@ def _read_appinfo_types(path: str) -> Dict[str, str]:
     logger.debug("appinfo.vdf path=%s bytes=%d", path, len(blob))
 
     try:
-        appinfo = parse_appinfo(blob)
+        logger.debug("parse_appinfo input=BytesIO")
+        appinfo = parse_appinfo(io.BytesIO(blob))
     except Exception as exc:
         logger.debug("parse_appinfo failed: %s", exc)
         return {}
@@ -180,7 +182,12 @@ def _read_appinfo_types(path: str) -> Dict[str, str]:
     types: Dict[str, str] = {}
     missing_common = 0
     missing_type = 0
+    sample_logged = 0
     for appid, info in appinfo.items():
+        if sample_logged < 5:
+            logger.debug(
+                "appinfo entry appid=%s keys=%s", appid, list(info.keys())[:10]
+            )
         try:
             appinfo_block = info.get("appinfo", {})
             common = appinfo_block.get("common", {})
@@ -195,6 +202,14 @@ def _read_appinfo_types(path: str) -> Dict[str, str]:
             missing_type += 1
         if app_type:
             types[str(appid)] = app_type
+            if sample_logged < 5:
+                logger.debug(
+                    "appinfo type appid=%s name=%s type=%s",
+                    appid,
+                    common.get("name"),
+                    app_type,
+                )
+                sample_logged += 1
 
     logger.debug(
         "appinfo types=%d missing_common=%d missing_type=%d",
@@ -246,6 +261,12 @@ def get_steam_installed_games() -> List[Tuple[str, str]]:
             if appid:
                 if appinfo_types:
                     app_type = appinfo_types.get(appid)
+                    logger.debug(
+                        "manifest appid=%s name=%s appinfo_type=%s",
+                        appid,
+                        name,
+                        app_type,
+                    )
                     if app_type != "game":
                         filtered_by_type += 1
                         continue
