@@ -142,6 +142,7 @@ def _find_appinfo_path() -> Optional[str]:
     for root in _steam_roots():
         candidates = [
             os.path.join(root, "appinfo.vdf"),
+            os.path.join(root, "appcache", "appinfo.vdf"),
             os.path.join(root, "steamapps", "appinfo.vdf"),
         ]
         for candidate in candidates:
