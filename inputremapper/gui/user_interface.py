@@ -171,7 +171,9 @@ class UserInterface:
         )
         RecordingStatus(message_broker, self.get("recording_status"))
         AutoloadSwitch(message_broker, controller, self.get("preset_autoload_switch"))
-        LinkGameDropdown(message_broker, self.get("preset_game_link_combo"))
+        LinkGameDropdown(
+            message_broker, controller, self.get("preset_game_link_combo")
+        )
         ReleaseCombinationSwitch(
             message_broker, controller, self.get("release-combination-switch")
         )

@@ -37,6 +37,8 @@ NONE = "none"
 INITIAL_CONFIG = {
     "version": VERSION,
     "autoload": {},
+    "game_bindings": {},
+    "default_preset": {},
 }
 
 
@@ -86,6 +88,59 @@ class GlobalConfig:
             raise ValueError("Expected group_key and preset to not be None")
 
         return self._config.get("autoload", {}).get(group_key) == preset
+
+    def get_game_binding(self, group_key: str, game_id: str) -> Optional[str]:
+        """Get the preset bound to a game for a device."""
+        bindings = self._config.get("game_bindings", {}).get(group_key, {})
+        return copy.deepcopy(bindings.get(game_id))
+
+    def get_game_binding_for_preset(
+        self, group_key: str, preset: str
+    ) -> Optional[str]:
+        """Get the game bound to a preset for a device."""
+        bindings = self._config.get("game_bindings", {}).get(group_key, {})
+        for game_id, bound_preset in bindings.items():
+            if bound_preset == preset:
+                return copy.deepcopy(game_id)
+        return None
+
+    def set_game_binding(self, group_key: str, game_id: str, preset: Optional[str]):
+        """Bind a game to a preset for a device.
+
+        If preset is None, remove the binding for that game.
+        Ensures a preset is only bound to a single game per device.
+        """
+        bindings = self._config.setdefault("game_bindings", {}).setdefault(
+            group_key, {}
+        )
+
+        if preset is None:
+            if game_id in bindings:
+                del bindings[game_id]
+                self._save_config()
+            return
+
+        # Remove existing binding for this preset on the same device.
+        for existing_game_id, bound_preset in list(bindings.items()):
+            if bound_preset == preset and existing_game_id != game_id:
+                del bindings[existing_game_id]
+
+        bindings[game_id] = preset
+        self._save_config()
+
+    def get_default_preset(self, group_key: str) -> Optional[str]:
+        """Get the default preset for a device."""
+        return copy.deepcopy(self._config.get("default_preset", {}).get(group_key))
+
+    def set_default_preset(self, group_key: str, preset: Optional[str]):
+        """Set the default preset for a device."""
+        defaults = self._config.setdefault("default_preset", {})
+        if preset is None:
+            if group_key in defaults:
+                del defaults[group_key]
+        else:
+            defaults[group_key] = preset
+        self._save_config()
 
     def load_config(self, path: Optional[str] = None):
         """Load the config from the file system.

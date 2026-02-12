@@ -603,6 +603,10 @@ class Controller:
         self.data_manager.set_autoload(autoload)
         self.data_manager.refresh_service_config_path()
 
+    def set_game_binding(self, game_id: Optional[str]):
+        """Bind the active preset to a game id (or remove the binding)."""
+        self.data_manager.set_game_binding(game_id)
+
     def save(self):
         """Save all data to the disc."""
         try:

@@ -109,7 +109,10 @@ class DataManager:
         """
         self.message_broker.publish(
             PresetData(
-                self.active_preset.name, self.get_mappings(), self.get_autoload()
+                self.active_preset.name,
+                self.get_mappings(),
+                self.get_autoload(),
+                self.get_game_binding(),
             )
         )
 
@@ -210,6 +213,34 @@ class DataManager:
         return self._config.is_autoloaded(
             self.active_group.key, self.active_preset.name
         )
+
+    def get_game_binding(self) -> Optional[str]:
+        """Get the game id bound to the active preset."""
+        if not self.active_preset or not self.active_group:
+            return None
+        return self._config.get_game_binding_for_preset(
+            self.active_group.key, self.active_preset.name
+        )
+
+    def set_game_binding(self, game_id: Optional[str]):
+        """Bind the active preset to a game id (or remove the binding)."""
+        if not self.active_preset or not self.active_group:
+            raise DataManagementError("Cannot set game binding: Preset is not set")
+
+        if not game_id:
+            existing = self._config.get_game_binding_for_preset(
+                self.active_group.key, self.active_preset.name
+            )
+            if existing:
+                self._config.set_game_binding(
+                    self.active_group.key, existing, None
+                )
+        else:
+            self._config.set_game_binding(
+                self.active_group.key, game_id, self.active_preset.name
+            )
+
+        self.publish_preset()
 
     def set_autoload(self, status: bool):
         """Set the autoload status of the active_preset.

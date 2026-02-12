@@ -678,29 +678,53 @@ class AutoloadSwitch:
 class LinkGameDropdown:
     """The dropdown used to select a Steam game to link the preset to."""
 
-    def __init__(self, message_broker: MessageBroker, gui: Gtk.ComboBoxText):
+    def __init__(
+        self,
+        message_broker: MessageBroker,
+        controller: Controller,
+        gui: Gtk.ComboBoxText,
+    ):
         self._message_broker = message_broker
+        self._controller = controller
         self._gui = gui
+        self._game_ids: Set[str] = set()
 
         self._populate()
+        self._gui.connect("changed", self._on_gtk_changed)
         self._message_broker.subscribe(MessageType.init, self._on_init)
+        self._message_broker.subscribe(MessageType.preset, self._on_preset_changed)
 
     def _on_init(self, _):
         self._populate()
 
     def _populate(self):
         self._gui.remove_all()
+        self._game_ids = set()
 
-        games = get_steam_installed_games()
-        if not games:
-            self._gui.append("none", _("No games found"))
-            self._gui.set_active_id("none")
-            return
+        self._gui.append("none", _("No Game"))
+        self._game_ids.add("none")
 
-        for appid, name in games:
+        for appid, name in get_steam_installed_games():
             self._gui.append(appid, name)
+            self._game_ids.add(appid)
 
-        self._gui.set_active(0)
+        self._gui.set_active_id("none")
+
+    def _on_preset_changed(self, data: PresetData):
+        desired = data.game_id or "none"
+        if desired not in self._game_ids and desired != "none":
+            self._gui.append(desired, _("Unknown Game (%s)") % desired)
+            self._game_ids.add(desired)
+
+        with HandlerDisabled(self._gui, self._on_gtk_changed):
+            self._gui.set_active_id(desired)
+
+    def _on_gtk_changed(self, *_):
+        game_id = self._gui.get_active_id()
+        if not game_id or game_id == "none":
+            self._controller.set_game_binding(None)
+        else:
+            self._controller.set_game_binding(game_id)
 
 
 class ReleaseCombinationSwitch:

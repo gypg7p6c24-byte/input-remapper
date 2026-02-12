@@ -80,6 +80,7 @@ class PresetData:
     name: Optional[Name]
     mappings: Optional[Tuple[MappingData, ...]]
     autoload: bool = False
+    game_id: Optional[str] = None
 
 
 @dataclass(frozen=True)
