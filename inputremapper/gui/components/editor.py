@@ -37,7 +37,7 @@ from evdev.ecodes import (
     BTN_EXTRA,
     BTN_SIDE,
 )
-from gi.repository import Gtk, GtkSource, Gdk
+from gi.repository import Gtk, GtkSource, Gdk, GLib
 
 from inputremapper.configs.input_config import InputCombination, InputConfig
 from inputremapper.configs.keyboard_layout import keyboard_layout, XKB_KEYCODE_OFFSET
@@ -728,6 +728,45 @@ class LinkGameDropdown:
             self._controller.set_game_binding(None)
         else:
             self._controller.set_game_binding(game_id)
+
+
+class ActiveWindowWatcher:
+    """Poll the active window and log changes (debug-only helper)."""
+
+    def __init__(self):
+        self._last = None
+        GLib.timeout_add(1000, self._poll)
+
+    def _poll(self):
+        display = Gdk.Display.get_default()
+        screen = Gdk.Screen.get_default()
+        if not display or not screen:
+            return True
+
+        window = screen.get_active_window()
+        if window is None:
+            return True
+
+        title = window.get_title() or ""
+        wm_class = window.get_wm_class() or ("", "")
+        xid = None
+        if hasattr(window, "get_xid"):
+            try:
+                xid = window.get_xid()
+            except Exception:
+                xid = None
+
+        current = (title, wm_class, xid)
+        if current != self._last:
+            self._last = current
+            logger.debug(
+                "Active window changed: title=%s wm_class=%s xid=%s",
+                title,
+                wm_class,
+                xid,
+            )
+
+        return True
 
 
 class ReleaseCombinationSwitch:
