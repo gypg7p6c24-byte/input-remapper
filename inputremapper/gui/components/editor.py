@@ -708,7 +708,8 @@ class LinkGameDropdown:
             self._gui.append(appid, name)
             self._game_ids.add(appid)
 
-        self._gui.set_active_id("none")
+        with HandlerDisabled(self._gui, self._on_gtk_changed):
+            self._gui.set_active_id("none")
 
     def _on_preset_changed(self, data: PresetData):
         desired = data.game_id or "none"
@@ -721,6 +722,8 @@ class LinkGameDropdown:
 
     def _on_gtk_changed(self, *_):
         game_id = self._gui.get_active_id()
+        if game_id is None:
+            return
         if not game_id or game_id == "none":
             self._controller.set_game_binding(None)
         else:

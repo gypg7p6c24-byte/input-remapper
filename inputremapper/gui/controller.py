@@ -605,7 +605,11 @@ class Controller:
 
     def set_game_binding(self, game_id: Optional[str]):
         """Bind the active preset to a game id (or remove the binding)."""
-        self.data_manager.set_game_binding(game_id)
+        try:
+            self.data_manager.set_game_binding(game_id)
+        except DataManagementError:
+            # preset/group may not be initialized yet
+            return
 
     def save(self):
         """Save all data to the disc."""
