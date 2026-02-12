@@ -242,6 +242,24 @@ def _find_common_offsets(data: bytes) -> List[int]:
     return offsets
 
 
+def _find_type_by_scan(entry: bytes) -> Optional[str]:
+    common_idx = entry.find(b"\x00common\x00")
+    if common_idx == -1:
+        return None
+
+    # Look ahead for a string type key in the common block.
+    scan_start = common_idx + len(b"\x00common\x00")
+    scan_end = min(len(entry), scan_start + 8192)
+    type_marker = b"\x01type\x00"
+    idx = entry.find(type_marker, scan_start, scan_end)
+    if idx == -1:
+        return None
+
+    value_start = idx + len(type_marker)
+    value, _ = _read_cstring(entry, value_start)
+    return value or None
+
+
 def _read_appinfo_types(path: str) -> Dict[str, str]:
     try:
         with open(path, "rb") as file:
@@ -283,6 +301,8 @@ def _read_appinfo_types(path: str) -> Dict[str, str]:
                 app_type, _ = _read_kv_object_find_type_in_common(entry, common_offset)
                 if app_type:
                     break
+        if not app_type:
+            app_type = _find_type_by_scan(entry)
         if app_type:
             types[str(appid)] = app_type
 
