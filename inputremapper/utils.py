@@ -272,6 +272,16 @@ def _read_appinfo_types(path: str) -> Dict[str, str]:
     if len(data) < 8:
         return {}
 
+    common_marker = b"\x00common\x00"
+    common_count = data.count(common_marker)
+    header_hex = data[:16].hex()
+    logger.debug(
+        "appinfo.vdf header=%s len=%d common_markers=%d",
+        header_hex,
+        len(data),
+        common_count,
+    )
+
     # skip header magic + universe
     offset += 8
     types: Dict[str, str] = {}
