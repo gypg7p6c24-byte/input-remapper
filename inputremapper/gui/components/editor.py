@@ -859,8 +859,57 @@ class ActiveWindowWatcher:
                 exc,
                 exc.output,
             )
+            self._try_shell_reexec(uuid)
         except Exception as exc:
             logger.info("WINDOW_WATCHER extension enable failed: %s", exc)
+            self._try_shell_reexec(uuid)
+
+    def _try_shell_reexec(self, uuid: str) -> None:
+        try:
+            logger.info("WINDOW_WATCHER attempting GNOME Shell reexec")
+            subprocess.check_output(
+                [
+                    "gdbus",
+                    "call",
+                    "--session",
+                    "--dest",
+                    "org.gnome.Shell",
+                    "--object-path",
+                    "/org/gnome/Shell",
+                    "--method",
+                    "org.gnome.Shell.Eval",
+                    "global.reexec_self()",
+                ],
+                stderr=subprocess.STDOUT,
+                text=True,
+            )
+            logger.info("WINDOW_WATCHER GNOME Shell reexec requested")
+        except subprocess.CalledProcessError as exc:
+            logger.info(
+                "WINDOW_WATCHER GNOME Shell reexec failed: %s output=%s",
+                exc,
+                exc.output,
+            )
+            return
+        except Exception as exc:
+            logger.info("WINDOW_WATCHER GNOME Shell reexec failed: %s", exc)
+            return
+
+        try:
+            enabled = subprocess.check_output(
+                ["gnome-extensions", "list", "--enabled"],
+                stderr=subprocess.STDOUT,
+                text=True,
+            ).strip()
+            logger.info("WINDOW_WATCHER extensions enabled: %s", enabled)
+            info = subprocess.check_output(
+                ["gnome-extensions", "info", uuid],
+                stderr=subprocess.STDOUT,
+                text=True,
+            ).strip()
+            logger.info("WINDOW_WATCHER extension info: %s", info)
+        except Exception as exc:
+            logger.info("WINDOW_WATCHER extension post-reexec check failed: %s", exc)
 
     def _poll(self):
         self._ticks += 1
