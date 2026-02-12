@@ -17,7 +17,7 @@ if [ -d "/run/systemd/system/" ]; then
 fi
 
 # Optional dependency for Steam appinfo parsing
-if ! /usr/bin/python3 -c "import steam" >/dev/null 2>&1; then
-  echo "Installing python module 'steam' for Steam game filtering..."
-  /usr/bin/python3 -m pip install --break-system-packages steam >/dev/null 2>&1 || true
+if ! /usr/bin/python3 -c "import steamfiles" >/dev/null 2>&1; then
+  echo "Installing python module 'steamfiles' for Steam game filtering..."
+  /usr/bin/python3 -m pip install --break-system-packages steamfiles >/dev/null 2>&1 || true
 fi

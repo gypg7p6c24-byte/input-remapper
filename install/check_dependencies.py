@@ -36,11 +36,11 @@ def check_dependencies() -> None:
         import pygobject
         import pydantic
         try:
-            import steam  # type: ignore
+            import steamfiles  # type: ignore
         except Exception:
             print(
-                "\033[93mOptional Python module missing: steam "
-                "(install python3-steam for Steam game filtering)\033[0m"
+                "\033[93mOptional Python module missing: steamfiles "
+                "(install via pip for Steam game filtering)\033[0m"
             )
 
         print("All required Python modules found")

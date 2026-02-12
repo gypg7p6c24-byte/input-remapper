@@ -152,12 +152,6 @@ def _find_appinfo_path() -> Optional[str]:
 
 def _read_appinfo_types(path: str) -> Dict[str, str]:
     try:
-        from steam.utils.appcache import parse_appinfo  # type: ignore
-    except Exception:
-        logger.debug("steam module not available; cannot parse appinfo.vdf")
-        return {}
-
-    try:
         with open(path, "rb") as file:
             blob = file.read()
     except Exception as exc:
@@ -166,60 +160,100 @@ def _read_appinfo_types(path: str) -> Dict[str, str]:
 
     logger.debug("appinfo.vdf path=%s bytes=%d", path, len(blob))
 
-    try:
-        logger.debug("parse_appinfo input=BytesIO")
-        appinfo = parse_appinfo(io.BytesIO(blob))
-    except Exception as exc:
-        logger.debug("parse_appinfo failed: %s", exc)
-        return {}
-
-    if not isinstance(appinfo, dict):
-        logger.debug("parse_appinfo returned non-dict: %s", type(appinfo))
-        return {}
-
-    logger.debug("parse_appinfo entries=%d", len(appinfo))
-
     types: Dict[str, str] = {}
-    missing_common = 0
-    missing_type = 0
-    sample_logged = 0
-    for appid, info in appinfo.items():
-        if sample_logged < 5:
-            logger.debug(
-                "appinfo entry appid=%s keys=%s", appid, list(info.keys())[:10]
-            )
-        try:
-            appinfo_block = info.get("appinfo", {})
+
+    # 1) Try steamfiles (supports newer appinfo formats)
+    try:
+        from steamfiles import appinfo as steamfiles_appinfo  # type: ignore
+
+        logger.debug("appinfo parser=steamfiles")
+        with open(path, "rb") as file:
+            appinfo_data = steamfiles_appinfo.load(file)
+
+        logger.debug("steamfiles entries=%d", len(appinfo_data))
+
+        missing_common = 0
+        missing_type = 0
+        sample_logged = 0
+
+        for appid, entry in appinfo_data.items():
+            # entry likely contains metadata + 'data' blob
+            data_block = entry.get("data", entry)
+            appinfo_block = data_block.get("appinfo", data_block)
             common = appinfo_block.get("common", {})
             app_type = common.get("type")
-        except Exception as exc:
-            logger.debug("appinfo entry parse failed appid=%s err=%s", appid, exc)
-            app_type = None
-            common = None
-        if not common:
-            missing_common += 1
-        if not app_type:
-            missing_type += 1
-        if app_type:
-            types[str(appid)] = app_type
-            if sample_logged < 5:
-                logger.debug(
-                    "appinfo type appid=%s name=%s type=%s",
-                    appid,
-                    common.get("name"),
-                    app_type,
-                )
-                sample_logged += 1
 
-    logger.debug(
-        "appinfo types=%d missing_common=%d missing_type=%d",
-        len(types),
-        missing_common,
-        missing_type,
-    )
-    if types:
-        sample = list(types.items())[:10]
-        logger.debug("appinfo sample types=%s", sample)
+            if not common:
+                missing_common += 1
+            if not app_type:
+                missing_type += 1
+
+            if app_type:
+                types[str(appid)] = app_type
+                if sample_logged < 5:
+                    logger.debug(
+                        "steamfiles type appid=%s name=%s type=%s",
+                        appid,
+                        common.get("name"),
+                        app_type,
+                    )
+                    sample_logged += 1
+
+        logger.debug(
+            "steamfiles types=%d missing_common=%d missing_type=%d",
+            len(types),
+            missing_common,
+            missing_type,
+        )
+
+        if types:
+            return types
+    except Exception as exc:
+        logger.debug("steamfiles parse failed: %s", exc)
+
+    # 2) Try steam (older appcache parser)
+    try:
+        from steam.utils.appcache import parse_appinfo  # type: ignore
+
+        logger.debug("appinfo parser=steam")
+        header, apps = parse_appinfo(io.BytesIO(blob))
+        logger.debug("steam header=%s", header)
+
+        missing_common = 0
+        missing_type = 0
+        sample_logged = 0
+
+        for entry in apps:
+            appid = entry.get("appid")
+            data_block = entry.get("data", {})
+            appinfo_block = data_block.get("appinfo", {})
+            common = appinfo_block.get("common", {})
+            app_type = common.get("type")
+
+            if not common:
+                missing_common += 1
+            if not app_type:
+                missing_type += 1
+
+            if appid is not None and app_type:
+                types[str(appid)] = app_type
+                if sample_logged < 5:
+                    logger.debug(
+                        "steam type appid=%s name=%s type=%s",
+                        appid,
+                        common.get("name"),
+                        app_type,
+                    )
+                    sample_logged += 1
+
+        logger.debug(
+            "steam types=%d missing_common=%d missing_type=%d",
+            len(types),
+            missing_common,
+            missing_type,
+        )
+    except Exception as exc:
+        logger.debug("steam parse failed: %s", exc)
 
     return types
 
