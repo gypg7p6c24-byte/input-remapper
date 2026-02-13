@@ -996,6 +996,7 @@ class ActiveWindowWatcher:
         # One-shot, global probe: run all methods and log everything.
         self._probe_dbus_names()
         self._probe_gnome_introspect()
+        self._probe_portal_window_tracker()
         self._poll_wayland()
         self._poll_wayland_gnome_eval()
         self._poll_x11()
@@ -1111,6 +1112,74 @@ class ActiveWindowWatcher:
             except Exception as exc:
                 self._log_debug_kv(
                     "gnome introspect call error",
+                    {"method": method, "error": exc},
+                )
+
+    def _probe_portal_window_tracker(self):
+        self._log_debug("portal window tracker attempt")
+        try:
+            result = subprocess.check_output(
+                [
+                    "gdbus",
+                    "introspect",
+                    "--session",
+                    "--dest",
+                    "org.freedesktop.portal.Desktop",
+                    "--object-path",
+                    "/org/freedesktop/portal/desktop",
+                ],
+                stderr=subprocess.STDOUT,
+                text=True,
+            ).strip()
+            self._log_debug_kv("portal introspect", {"output": result})
+        except subprocess.CalledProcessError as exc:
+            self._log_debug_kv(
+                "portal introspect error",
+                {"error": exc, "output": exc.output},
+            )
+            return
+        except FileNotFoundError:
+            self._log_debug("portal introspect: gdbus not found")
+            return
+        except Exception as exc:
+            self._log_debug_kv("portal introspect error", {"error": exc})
+            return
+
+        methods = [
+            "GetActiveWindow",
+            "GetFocusedWindow",
+            "GetFocus",
+            "GetWindows",
+        ]
+        for method in methods:
+            try:
+                output = subprocess.check_output(
+                    [
+                        "gdbus",
+                        "call",
+                        "--session",
+                        "--dest",
+                        "org.freedesktop.portal.Desktop",
+                        "--object-path",
+                        "/org/freedesktop/portal/desktop",
+                        "--method",
+                        f"org.freedesktop.portal.WindowTracker.{method}",
+                    ],
+                    stderr=subprocess.STDOUT,
+                    text=True,
+                ).strip()
+                self._log_debug_kv(
+                    "portal window tracker call",
+                    {"method": method, "output": output},
+                )
+            except subprocess.CalledProcessError as exc:
+                self._log_debug_kv(
+                    "portal window tracker call error",
+                    {"method": method, "error": exc, "output": exc.output},
+                )
+            except Exception as exc:
+                self._log_debug_kv(
+                    "portal window tracker call error",
                     {"method": method, "error": exc},
                 )
 
