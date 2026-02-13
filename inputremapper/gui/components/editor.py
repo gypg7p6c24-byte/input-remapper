@@ -42,7 +42,6 @@ import os
 import re
 import shutil
 import subprocess
-import time
 
 from gi.repository import Gtk, GtkSource, Gdk, GLib
 
@@ -75,36 +74,6 @@ from inputremapper.utils import (
 if TYPE_CHECKING:
     from inputremapper.gui.data_manager import DataManager
 
-
-_DEBUG_LOG_PATH = None
-
-
-def _debug_log_path() -> Optional[str]:
-    global _DEBUG_LOG_PATH
-    if _DEBUG_LOG_PATH is None:
-        _DEBUG_LOG_PATH = os.environ.get("INPUT_REMAPPER_DEBUG_LOG")
-        if not _DEBUG_LOG_PATH:
-            _DEBUG_LOG_PATH = os.path.join(
-                os.path.expanduser("~"),
-                ".config",
-                "input-remapper-2",
-                "debug.log",
-            )
-    return _DEBUG_LOG_PATH
-
-
-def _append_debug_log(line: str) -> None:
-    path = _debug_log_path()
-    if not path:
-        return
-    try:
-        os.makedirs(os.path.dirname(path), exist_ok=True)
-        timestamp = time.strftime("%Y-%m-%d %H:%M:%S")
-        with open(path, "a", encoding="utf-8") as handle:
-            handle.write(f"{timestamp} {line}\n")
-    except Exception:
-        # Never fail because of debug logging.
-        return
 
 Capabilities = Dict[int, List]
 
@@ -1543,47 +1512,59 @@ class SteamProcessWatcher:
         GLib.timeout_add(1000, self._poll)
 
     def _log_debug(self, message: str, *args):
-        logger.info("GAME_WATCHER_DEBUG " + message, *args)
+        logger.debug("GAME_WATCHER_DEBUG " + message, *args)
 
     def _log_debug_kv(self, label: str, mapping: dict):
         try:
             parts = []
             for key, value in mapping.items():
                 parts.append(f"{key}={value!r}")
-            logger.info("GAME_WATCHER_DEBUG %s %s", label, " ".join(parts))
+            logger.debug("GAME_WATCHER_DEBUG %s %s", label, " ".join(parts))
         except Exception as exc:
-            logger.info("GAME_WATCHER_DEBUG %s failed: %s", label, exc)
+            logger.debug("GAME_WATCHER_DEBUG %s failed: %s", label, exc)
 
     def _poll(self):
         self._ticks += 1
-        self._log_debug_kv("tick", {"ticks": self._ticks})
         hits = []
-        steam_pids = []
         for pid in self._list_pids():
             info = self._inspect_pid(pid)
-            if info.get("steam_client"):
-                steam_pids.append(pid)
             if info.get("matches"):
                 hits.append(info)
-                self._log_debug_kv("proc match", info)
-        self._log_debug_kv(
-            "summary",
-            {
-                "steam_client_pids": steam_pids,
-                "match_count": len(hits),
-                "matches": hits,
-            },
-        )
         current_appids = sorted({match["appid"] for match in hits if match.get("appid")})
         if current_appids != self._last:
             self._last = current_appids
-            logger.info("GAME_WATCHER change appids=%s", current_appids)
+            logger.info(
+                "GAME_WATCHER change appids=%s details=%s",
+                current_appids,
+                self._summarize_hits(hits, current_appids),
+            )
             if self._on_change:
                 try:
                     self._on_change(current_appids)
                 except Exception as exc:
                     self._log_debug_kv("callback error", {"error": exc})
         return True
+
+    def _summarize_hits(self, hits: List[dict], appids: List[str]) -> List[dict]:
+        summaries = []
+        for appid in appids:
+            hit = next((entry for entry in hits if entry.get("appid") == appid), None)
+            if not hit:
+                continue
+            source = ""
+            if hit.get("matches"):
+                source = hit["matches"][0][0]
+            exe = os.path.basename(hit.get("exe") or "")
+            summaries.append(
+                {
+                    "appid": appid,
+                    "name": hit.get("name", ""),
+                    "source": source,
+                    "pid": hit.get("pid"),
+                    "exe": exe,
+                }
+            )
+        return summaries
 
     def _list_pids(self):
         try:
@@ -1599,16 +1580,7 @@ class SteamProcessWatcher:
         cmdline = self._safe_read_cmdline(f"/proc/{pid}/cmdline")
         env = self._safe_read_environ(f"/proc/{pid}/environ")
         matches = []
-
-        steam_client = False
         cmd_text = " ".join(cmdline)
-        if cmdline and (
-            "steam" in cmdline[0].lower()
-            or "steam" in cmd_text.lower()
-            or "pressure-vessel" in cmd_text.lower()
-            or "reaper" in cmd_text.lower()
-        ):
-            steam_client = True
 
         appid_env = self._get_env_appid(env)
         if appid_env:
@@ -1634,17 +1606,10 @@ class SteamProcessWatcher:
             "pid": pid,
             "exe": exe,
             "cwd": cwd,
-            "cmdline": cmdline,
-            "env": env,
-            "env_steam": {k: v for k, v in env.items() if "STEAM" in k or "Steam" in k},
-            "steam_client": steam_client,
             "matches": matches,
             "appid": appid,
             "name": self._name_by_appid.get(appid, ""),
         }
-
-        if steam_client and not matches:
-            self._log_debug_kv("steam proc", info)
 
         return info
 
