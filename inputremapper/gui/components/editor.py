@@ -871,6 +871,60 @@ class ActiveWindowWatcher:
         except Exception:
             return
 
+    def _iter_atspi_children(self, node):
+        try:
+            count = getattr(node, "childCount", 0)
+        except Exception:
+            count = 0
+
+        if count:
+            for index in range(count):
+                try:
+                    yield node.getChildAtIndex(index)
+                except Exception:
+                    continue
+        else:
+            try:
+                for child in node:
+                    yield child
+            except Exception:
+                return
+
+    def _find_atspi_focused(self, node, pyatspi, budget):
+        if budget[0] <= 0:
+            return None
+        budget[0] -= 1
+        try:
+            state = node.getState()
+            if state and (
+                state.contains(pyatspi.STATE_FOCUSED)
+                or state.contains(pyatspi.STATE_ACTIVE)
+            ):
+                return node
+        except Exception:
+            pass
+
+        for child in self._iter_atspi_children(node):
+            found = self._find_atspi_focused(child, pyatspi, budget)
+            if found:
+                return found
+        return None
+
+    def _find_atspi_parent_role(self, node, roles):
+        current = node
+        while current is not None:
+            try:
+                role = current.getRole()
+                if role in roles:
+                    return current
+            except Exception:
+                pass
+            try:
+                current = current.parent
+            except Exception:
+                break
+        return None
+
     def _poll(self):
         self._ticks += 1
         if self._mode != "wayland":
@@ -983,7 +1037,6 @@ class ActiveWindowWatcher:
 
         try:
             desktop = pyatspi.Registry.getDesktop(0)
-            active_app = None
             applications = []
             try:
                 count = getattr(desktop, "childCount", 0)
@@ -995,41 +1048,66 @@ class ActiveWindowWatcher:
                 except Exception:
                     applications = []
 
+            focused = None
             for application in applications:
-                try:
-                    state = application.getState()
-                    if state.contains(pyatspi.STATE_ACTIVE) or state.contains(
-                        pyatspi.STATE_FOCUSED
-                    ):
-                        active_app = application
-                        break
-                except Exception:
-                    continue
+                focused = self._find_atspi_focused(application, pyatspi, [2500])
+                if focused:
+                    break
 
-            if not active_app:
+            if not focused:
                 return True, None, None
 
+            window_roles = []
+            for role_name in ("ROLE_FRAME", "ROLE_WINDOW", "ROLE_DIALOG"):
+                role = getattr(pyatspi, role_name, None)
+                if role is not None:
+                    window_roles.append(role)
+            window = (
+                self._find_atspi_parent_role(focused, window_roles)
+                if window_roles
+                else None
+            )
+
+            app_role = getattr(pyatspi, "ROLE_APPLICATION", None)
+            app = (
+                self._find_atspi_parent_role(focused, [app_role])
+                if app_role is not None
+                else None
+            )
+
             title = ""
-            try:
-                for child in active_app:
-                    child_name = getattr(child, "name", "")
-                    if child_name:
-                        title = child_name
-                        break
-            except Exception:
-                title = ""
+            for candidate in (window, focused):
+                if not candidate:
+                    continue
+                try:
+                    name = getattr(candidate, "name", "") or ""
+                except Exception:
+                    name = ""
+                if name:
+                    title = name
+                    break
 
             pid = 0
-            try:
-                pid = active_app.get_process_id()
-            except Exception:
-                pid = 0
+            for candidate in (app, window, focused):
+                if not candidate:
+                    continue
+                try:
+                    pid = candidate.get_process_id()
+                except Exception:
+                    pid = 0
+                if pid:
+                    break
 
             app_name = ""
-            try:
-                app_name = active_app.name or ""
-            except Exception:
-                app_name = ""
+            for candidate in (app, window, focused):
+                if not candidate:
+                    continue
+                try:
+                    app_name = candidate.name or ""
+                except Exception:
+                    app_name = ""
+                if app_name:
+                    break
 
             return (
                 True,

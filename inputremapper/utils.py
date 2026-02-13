@@ -154,6 +154,20 @@ def _parse_appmanifest_details(path: str) -> Optional[Tuple[str, str, str]]:
     return appid, name, installdir
 
 
+def _is_steam_runtime(name: str, installdir: Optional[str] = None) -> bool:
+    """Return True for Steam runtimes/tools that shouldn't appear in the game list."""
+    haystack = f"{name} {installdir or ''}".lower()
+    if "proton" in haystack:
+        return True
+    if "steam linux runtime" in haystack:
+        return True
+    if "steamworks common redistributables" in haystack:
+        return True
+    if "steamworks shared" in haystack:
+        return True
+    return False
+
+
 def get_steam_installed_games() -> List[Tuple[str, str]]:
     """Return a list of (appid, name) for locally installed Steam games."""
     games: dict[str, str] = {}
@@ -178,7 +192,7 @@ def get_steam_installed_games() -> List[Tuple[str, str]]:
 
             appid, name = parsed
             appid = appid or appid_from_name
-            if appid:
+            if appid and not _is_steam_runtime(name):
                 games[appid] = name
 
     return sorted(games.items(), key=lambda item: item[1].lower())
@@ -209,6 +223,8 @@ def get_steam_installed_game_paths() -> List[Tuple[str, str, str]]:
             appid, name, installdir = parsed
             appid = appid or appid_from_name
             if not appid or not installdir:
+                continue
+            if _is_steam_runtime(name, installdir):
                 continue
 
             install_path = os.path.join(library, "common", installdir)
