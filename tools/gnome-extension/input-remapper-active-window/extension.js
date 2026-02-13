@@ -1,4 +1,4 @@
-const Gio = imports.gi.Gio;
+import Gio from 'gi://Gio';
 
 const IFACE_XML = `<node>
   <interface name="org.inputremapper.ActiveWindow">
@@ -39,29 +39,37 @@ let _service = null;
 let _exported = null;
 let _nameId = 0;
 
-function init() {}
+export function init() {}
 
-function enable() {
-  _service = new ActiveWindowService();
-  _exported = Gio.DBusExportedObject.wrapJSObject(IFACE_XML, _service);
-  _exported.export(Gio.DBus.session, "/org/inputremapper/ActiveWindow");
-
-  _nameId = Gio.DBus.session.own_name(
-    "org.inputremapper.ActiveWindow",
-    Gio.BusNameOwnerFlags.NONE,
-    null,
-    null
-  );
+export function enable() {
+  try {
+    _service = new ActiveWindowService();
+    _exported = Gio.DBusExportedObject.wrapJSObject(IFACE_XML, _service);
+    _exported.export(Gio.DBus.session, "/org/inputremapper/ActiveWindow");
+    _nameId = Gio.bus_own_name(
+      Gio.BusType.SESSION,
+      "org.inputremapper.ActiveWindow",
+      Gio.BusNameOwnerFlags.NONE,
+      null,
+      null
+    );
+  } catch (e) {
+    logError(e, "input-remapper-active-window enable failed");
+  }
 }
 
-function disable() {
-  if (_exported) {
-    _exported.unexport();
-    _exported = null;
+export function disable() {
+  try {
+    if (_exported) {
+      _exported.unexport();
+      _exported = null;
+    }
+    if (_nameId) {
+      Gio.bus_unown_name(_nameId);
+      _nameId = 0;
+    }
+    _service = null;
+  } catch (e) {
+    logError(e, "input-remapper-active-window disable failed");
   }
-  if (_nameId) {
-    Gio.DBus.session.unown_name(_nameId);
-    _nameId = 0;
-  }
-  _service = null;
 }
