@@ -20,7 +20,9 @@
 """Logging setup for input-remapper."""
 
 import logging
+import os
 import time
+from typing import Optional
 from typing import cast
 
 from inputremapper.logging.formatter import ColorfulFormatter
@@ -35,6 +37,9 @@ previous_write_debug_log = None
 
 
 class Logger(logging.Logger):
+    _file_handler: Optional[logging.Handler] = None
+    _file_handler_path: Optional[str] = None
+
     def debug_mapping_handler(self, mapping_handler):
         """Parse the structure of a mapping_handler and log it."""
         if not self.isEnabledFor(logging.DEBUG):
@@ -128,6 +133,48 @@ class Logger(logging.Logger):
         for handler in self.handlers:
             handler.setFormatter(ColorfulFormatter(debug))
 
+        self._configure_file_handler(debug)
+
+    def _configure_file_handler(self, debug: bool) -> None:
+        if not debug:
+            if self._file_handler is not None:
+                self.removeHandler(self._file_handler)
+                try:
+                    self._file_handler.close()
+                finally:
+                    self._file_handler = None
+                    self._file_handler_path = None
+            return
+
+        if self._file_handler is not None:
+            return
+
+        path = _default_debug_log_path()
+        if not path:
+            return
+
+        try:
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+        except Exception:
+            # Ignore directory creation errors; FileHandler will raise if needed.
+            pass
+
+        try:
+            handler = logging.FileHandler(path, encoding="utf-8")
+            handler.setLevel(logging.DEBUG)
+            handler.setFormatter(
+                logging.Formatter(
+                    "%(asctime)s %(process)d %(levelname)s %(filename)s:%(lineno)d: %(message)s",
+                    datefmt="%Y-%m-%d %H:%M:%S",
+                )
+            )
+            self.addHandler(handler)
+            self._file_handler = handler
+            self._file_handler_path = path
+            self.info("Debug logs will be written to %s", path)
+        except Exception as exc:
+            self.warning("Could not open debug log file %s: %s", path, exc)
+
     @classmethod
     def bootstrap_logger(cls):
         # https://github.com/python/typeshed/issues/1801
@@ -156,3 +203,29 @@ except Exception as error:
 
 # check if the version is something like 1.5.0-beta or 1.5.0-beta.5
 IS_BETA = "beta" in VERSION
+
+
+def _default_debug_log_path() -> Optional[str]:
+    path = os.environ.get("INPUT_REMAPPER_DEBUG_LOG")
+    if path:
+        return path
+
+    uid = os.environ.get("PKEXEC_UID") or os.environ.get("SUDO_UID")
+    user = os.environ.get("PKEXEC_USER") or os.environ.get("SUDO_USER")
+    home = None
+    if user:
+        home = os.path.expanduser(f"~{user}")
+    if not home and uid:
+        try:
+            import pwd
+
+            home = pwd.getpwuid(int(uid)).pw_dir
+        except Exception:
+            home = None
+    if not home:
+        home = os.path.expanduser("~")
+
+    if home:
+        return os.path.join(home, ".config", "input-remapper-2", "debug.log")
+
+    return os.path.join("/tmp", "input-remapper-debug.log")

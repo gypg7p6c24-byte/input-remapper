@@ -42,6 +42,7 @@ import os
 import re
 import shutil
 import subprocess
+import time
 
 from gi.repository import Gtk, GtkSource, Gdk, GLib
 
@@ -73,6 +74,37 @@ from inputremapper.utils import (
 
 if TYPE_CHECKING:
     from inputremapper.gui.data_manager import DataManager
+
+
+_DEBUG_LOG_PATH = None
+
+
+def _debug_log_path() -> Optional[str]:
+    global _DEBUG_LOG_PATH
+    if _DEBUG_LOG_PATH is None:
+        _DEBUG_LOG_PATH = os.environ.get("INPUT_REMAPPER_DEBUG_LOG")
+        if not _DEBUG_LOG_PATH:
+            _DEBUG_LOG_PATH = os.path.join(
+                os.path.expanduser("~"),
+                ".config",
+                "input-remapper-2",
+                "debug.log",
+            )
+    return _DEBUG_LOG_PATH
+
+
+def _append_debug_log(line: str) -> None:
+    path = _debug_log_path()
+    if not path:
+        return
+    try:
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        timestamp = time.strftime("%Y-%m-%d %H:%M:%S")
+        with open(path, "a", encoding="utf-8") as handle:
+            handle.write(f"{timestamp} {line}\n")
+    except Exception:
+        # Never fail because of debug logging.
+        return
 
 Capabilities = Dict[int, List]
 
