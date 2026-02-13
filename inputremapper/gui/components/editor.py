@@ -801,6 +801,7 @@ class ActiveWindowWatcher:
                 text=True,
             )
             logger.info("WINDOW_WATCHER extension enabled")
+            self._log_extension_state(uuid)
         except FileNotFoundError:
             logger.info("WINDOW_WATCHER gnome-extensions not found")
         except subprocess.CalledProcessError as exc:
@@ -809,8 +810,24 @@ class ActiveWindowWatcher:
                 exc,
                 exc.output,
             )
+            self._log_extension_state(uuid)
         except Exception as exc:
             logger.info("WINDOW_WATCHER extension enable failed: %s", exc)
+            self._log_extension_state(uuid)
+
+    def _log_extension_state(self, uuid: str) -> None:
+        try:
+            info = subprocess.check_output(
+                ["gnome-extensions", "info", uuid],
+                stderr=subprocess.STDOUT,
+                text=True,
+            )
+            for line in info.splitlines():
+                if line.strip().startswith("State:"):
+                    logger.info("WINDOW_WATCHER extension %s", line.strip())
+                    return
+        except Exception:
+            return
 
     def _poll(self):
         self._ticks += 1
@@ -822,8 +839,15 @@ class ActiveWindowWatcher:
             atspi_available, atspi_data, atspi_error = self._fetch_atspi()
             if atspi_available and atspi_data:
                 available, data, error = True, atspi_data, None
-            elif not available:
-                available, data, error = atspi_available, atspi_data, atspi_error or error
+            else:
+                if not available:
+                    detail = []
+                    if error:
+                        detail.append(f"wayland={error}")
+                    if atspi_error:
+                        detail.append(f"atspi={atspi_error}")
+                    error = "; ".join(detail) if detail else error
+                available, data = atspi_available, atspi_data
 
         if not available:
             self._emit_state(False, None, error)
