@@ -745,9 +745,47 @@ class ActiveWindowWatcher:
         self._ticks = 0
         self._mode = os.environ.get("XDG_SESSION_TYPE", "").lower()
         logger.info("WINDOW_WATCHER started (poll=1000ms)")
+        self._log_env()
         if self._mode == "wayland":
             self._ensure_gnome_extension()
         GLib.timeout_add(1000, self._poll)
+
+    def _log_env(self):
+        self._log_debug_kv(
+            "env",
+            {
+                "XDG_SESSION_TYPE": os.environ.get("XDG_SESSION_TYPE", ""),
+                "XDG_CURRENT_DESKTOP": os.environ.get("XDG_CURRENT_DESKTOP", ""),
+                "XDG_SESSION_DESKTOP": os.environ.get("XDG_SESSION_DESKTOP", ""),
+                "GNOME_SHELL_SESSION_MODE": os.environ.get(
+                    "GNOME_SHELL_SESSION_MODE", ""
+                ),
+                "WAYLAND_DISPLAY": os.environ.get("WAYLAND_DISPLAY", ""),
+                "DISPLAY": os.environ.get("DISPLAY", ""),
+            },
+        )
+        self._log_debug_kv(
+            "cmds",
+            {
+                "gdbus": shutil.which("gdbus"),
+                "gnome-extensions": shutil.which("gnome-extensions"),
+                "xdotool": shutil.which("xdotool"),
+                "wmctrl": shutil.which("wmctrl"),
+                "swaymsg": shutil.which("swaymsg"),
+            },
+        )
+
+    def _log_debug(self, message: str, *args):
+        logger.info("WINDOW_WATCHER_DEBUG " + message, *args)
+
+    def _log_debug_kv(self, label: str, mapping: dict):
+        try:
+            parts = []
+            for key, value in mapping.items():
+                parts.append(f"{key}={value!r}")
+            logger.info("WINDOW_WATCHER_DEBUG %s %s", label, " ".join(parts))
+        except Exception as exc:
+            logger.info("WINDOW_WATCHER_DEBUG %s failed: %s", label, exc)
 
     def _ensure_gnome_extension(self):
         uuid = "input-remapper-active-window@inputremapper"
@@ -766,8 +804,8 @@ class ActiveWindowWatcher:
         desktop = os.environ.get("XDG_CURRENT_DESKTOP", "")
         session_desktop = os.environ.get("XDG_SESSION_DESKTOP", "")
         session_mode = os.environ.get("GNOME_SHELL_SESSION_MODE", "")
-        logger.info(
-            "WINDOW_WATCHER env desktop=%s session_desktop=%s session_mode=%s",
+        self._log_debug(
+            "env desktop=%s session_desktop=%s session_mode=%s",
             desktop,
             session_desktop,
             session_mode,
@@ -776,8 +814,8 @@ class ActiveWindowWatcher:
             logger.info("WINDOW_WATCHER unsupported desktop for extension")
             return
 
-        logger.info(
-            "WINDOW_WATCHER extension source_dir=%s exists=%s",
+        self._log_debug(
+            "extension source_dir=%s exists=%s",
             source_dir,
             os.path.isdir(source_dir),
         )
@@ -794,8 +832,8 @@ class ActiveWindowWatcher:
                     shutil.copy2(src, dst)
             meta_path = os.path.join(target_dir, "metadata.json")
             ext_path = os.path.join(target_dir, "extension.js")
-            logger.info(
-                "WINDOW_WATCHER extension installed to %s meta=%s ext=%s",
+            self._log_debug(
+                "extension installed to %s meta=%s ext=%s",
                 target_dir,
                 os.path.exists(meta_path),
                 os.path.exists(ext_path),
@@ -810,14 +848,14 @@ class ActiveWindowWatcher:
                 src_meta = os.path.join(source_dir, "metadata.json")
                 src_ext = os.path.join(source_dir, "extension.js")
                 if os.path.exists(src_meta) and os.path.exists(meta_path):
-                    logger.info(
-                        "WINDOW_WATCHER meta sha src=%s dst=%s",
+                    self._log_debug(
+                        "meta sha src=%s dst=%s",
                         _hash(src_meta),
                         _hash(meta_path),
                     )
                 if os.path.exists(src_ext) and os.path.exists(ext_path):
-                    logger.info(
-                        "WINDOW_WATCHER ext sha src=%s dst=%s",
+                    self._log_debug(
+                        "ext sha src=%s dst=%s",
                         _hash(src_ext),
                         _hash(ext_path),
                     )
@@ -834,10 +872,7 @@ class ActiveWindowWatcher:
                 )
                 if os.path.isdir(cache_dir):
                     shutil.rmtree(cache_dir, ignore_errors=True)
-                    logger.info(
-                        "WINDOW_WATCHER extension cache cleared: %s",
-                        cache_dir,
-                    )
+                    self._log_debug("extension cache cleared: %s", cache_dir)
             except Exception as exc:
                 logger.info("WINDOW_WATCHER extension cache clear failed: %s", exc)
         except Exception as exc:
@@ -850,19 +885,19 @@ class ActiveWindowWatcher:
                 stderr=subprocess.STDOUT,
                 text=True,
             ).strip()
-            logger.info("WINDOW_WATCHER gnome-extensions version: %s", version)
+            self._log_debug("gnome-extensions version: %s", version)
             enabled = subprocess.check_output(
                 ["gnome-extensions", "list", "--enabled"],
                 stderr=subprocess.STDOUT,
                 text=True,
             ).strip()
-            logger.info("WINDOW_WATCHER extensions enabled: %s", enabled)
+            self._log_debug("extensions enabled: %s", enabled)
             available = subprocess.check_output(
                 ["gnome-extensions", "list"],
                 stderr=subprocess.STDOUT,
                 text=True,
             ).strip()
-            logger.info("WINDOW_WATCHER extensions available: %s", available)
+            self._log_debug("extensions available: %s", available)
         except subprocess.CalledProcessError as exc:
             logger.info(
                 "WINDOW_WATCHER gnome-extensions probe failed: %s output=%s",
@@ -886,7 +921,7 @@ class ActiveWindowWatcher:
                 stderr=subprocess.STDOUT,
                 text=True,
             ).strip()
-            logger.info("WINDOW_WATCHER extensions enabled: %s", enabled)
+            self._log_debug("extensions enabled: %s", enabled)
             info = subprocess.check_output(
                 ["gnome-extensions", "info", uuid],
                 stderr=subprocess.STDOUT,
@@ -953,23 +988,30 @@ class ActiveWindowWatcher:
 
     def _poll(self):
         self._ticks += 1
-        if self._mode == "wayland":
-            return self._poll_wayland()
-        return self._poll_x11()
+        self._log_debug_kv("tick", {"ticks": self._ticks, "mode": self._mode})
+        # Run all methods and log results, regardless of session type.
+        self._poll_wayland()
+        self._poll_x11()
+        self._poll_x11_xdotool_fallback()
+        self._poll_x11_wmctrl_fallback()
+        self._poll_wayland_gnome_eval()
+        return True
 
     def _poll_x11(self):
+        self._log_debug("x11 gdk attempt")
         display = Gdk.Display.get_default()
         screen = Gdk.Screen.get_default()
         if not display or not screen:
-            if self._ticks % 10 == 0:
-                logger.info("WINDOW_WATCHER heartbeat (no display/screen)")
-            return self._poll_x11_xdotool_fallback()
+            self._log_debug_kv(
+                "x11 gdk no display/screen",
+                {"display": display, "screen": screen},
+            )
+            return True
 
         window = screen.get_active_window()
         if window is None:
-            if self._ticks % 10 == 0:
-                logger.info("WINDOW_WATCHER heartbeat (no active window)")
-            return self._poll_x11_xdotool_fallback()
+            self._log_debug("x11 gdk no active window")
+            return True
 
         title = window.get_title() or ""
         wm_class = window.get_wm_class() or ("", "")
@@ -981,6 +1023,16 @@ class ActiveWindowWatcher:
                 xid = None
 
         current = (title, wm_class, xid)
+        self._log_debug_kv(
+            "x11 gdk values",
+            {
+                "title": title,
+                "wm_class": wm_class,
+                "xid": xid,
+                "current": current,
+                "last": self._last,
+            },
+        )
         if current != self._last:
             self._last = current
             logger.info(
@@ -1000,6 +1052,7 @@ class ActiveWindowWatcher:
         return True
 
     def _poll_x11_xdotool_fallback(self):
+        self._log_debug("x11 xdotool attempt")
         try:
             xid = subprocess.check_output(
                 ["xdotool", "getactivewindow"],
@@ -1007,8 +1060,7 @@ class ActiveWindowWatcher:
                 text=True,
             ).strip()
             if not xid:
-                if self._ticks % 10 == 0:
-                    logger.info("WINDOW_WATCHER heartbeat (xdotool no xid)")
+                self._log_debug("x11 xdotool no xid")
                 return True
 
             title = subprocess.check_output(
@@ -1026,6 +1078,16 @@ class ActiveWindowWatcher:
                 wm_class = ""
 
             current = (title, wm_class, xid)
+            self._log_debug_kv(
+                "x11 xdotool values",
+                {
+                    "title": title,
+                    "wm_class": wm_class,
+                    "xid": xid,
+                    "current": current,
+                    "last": self._last,
+                },
+            )
             if current != self._last:
                 self._last = current
                 logger.info(
@@ -1042,22 +1104,77 @@ class ActiveWindowWatcher:
                     xid,
                 )
         except FileNotFoundError:
-            if self._ticks % 10 == 0:
-                logger.info("WINDOW_WATCHER heartbeat (xdotool not found)")
+            self._log_debug("x11 xdotool not found")
         except subprocess.CalledProcessError as exc:
-            if self._ticks % 10 == 0:
-                logger.info(
-                    "WINDOW_WATCHER heartbeat (xdotool error=%s output=%s)",
-                    exc,
-                    exc.output,
-                )
+            self._log_debug_kv(
+                "x11 xdotool error",
+                {"error": exc, "output": exc.output},
+            )
         except Exception as exc:
-            if self._ticks % 10 == 0:
-                logger.info("WINDOW_WATCHER heartbeat (xdotool error=%s)", exc)
+            self._log_debug_kv("x11 xdotool error", {"error": exc})
 
         return True
 
+    def _poll_x11_wmctrl_fallback(self):
+        self._log_debug("x11 wmctrl attempt")
+        try:
+            active = subprocess.check_output(
+                ["wmctrl", "-lpG"],
+                stderr=subprocess.STDOUT,
+                text=True,
+            )
+            self._log_debug_kv("x11 wmctrl raw", {"output": active.strip()})
+        except FileNotFoundError:
+            self._log_debug("x11 wmctrl not found")
+        except subprocess.CalledProcessError as exc:
+            self._log_debug_kv(
+                "x11 wmctrl error",
+                {"error": exc, "output": exc.output},
+            )
+        except Exception as exc:
+            self._log_debug_kv("x11 wmctrl error", {"error": exc})
+        return True
+
+    def _poll_wayland_gnome_eval(self):
+        if self._mode != "wayland":
+            return True
+        self._log_debug("wayland gnome-shell eval attempt")
+        try:
+            result = subprocess.check_output(
+                [
+                    "gdbus",
+                    "call",
+                    "--session",
+                    "--dest",
+                    "org.gnome.Shell",
+                    "--object-path",
+                    "/org/gnome/Shell",
+                    "--method",
+                    "org.gnome.Shell.Eval",
+                    "JSON.stringify({"
+                    "title:(global.display.get_focus_window()&&global.display.get_focus_window().get_title&&global.display.get_focus_window().get_title())||'',"
+                    "wm_class:(global.display.get_focus_window()&&global.display.get_focus_window().get_wm_class&&global.display.get_focus_window().get_wm_class())||'',"
+                    "app_id:(global.display.get_focus_window()&&global.display.get_focus_window().get_gtk_application_id&&global.display.get_focus_window().get_gtk_application_id())||'',"
+                    "pid:(global.display.get_focus_window()&&global.display.get_focus_window().get_pid&&global.display.get_focus_window().get_pid())||0"
+                    "})",
+                ],
+                stderr=subprocess.STDOUT,
+                text=True,
+            ).strip()
+            self._log_debug_kv("wayland gnome-shell eval output", {"output": result})
+        except FileNotFoundError:
+            self._log_debug("wayland gdbus not found")
+        except subprocess.CalledProcessError as exc:
+            self._log_debug_kv(
+                "wayland gnome-shell eval error",
+                {"error": exc, "output": exc.output},
+            )
+        except Exception as exc:
+            self._log_debug_kv("wayland gnome-shell eval error", {"error": exc})
+        return True
+
     def _poll_wayland(self):
+        self._log_debug("wayland extension gdbus attempt")
         try:
             result = subprocess.check_output(
                 [
@@ -1075,35 +1192,32 @@ class ActiveWindowWatcher:
                 text=True,
             ).strip()
         except subprocess.CalledProcessError as exc:
-            if self._ticks % 10 == 0:
-                logger.info(
-                    "WINDOW_WATCHER heartbeat (extension error=%s output=%s)",
-                    exc,
-                    exc.output,
-                )
+            self._log_debug_kv(
+                "wayland gdbus error",
+                {"error": exc, "output": exc.output},
+            )
             return True
         except Exception as exc:
-            if self._ticks % 10 == 0:
-                logger.info("WINDOW_WATCHER heartbeat (extension error=%s)", exc)
+            self._log_debug_kv("wayland gdbus error", {"error": exc})
             return True
 
         match = re.match(r"^\('(.*)'\)$", result)
         if not match:
-            if self._ticks % 10 == 0:
-                logger.info("WINDOW_WATCHER heartbeat (gdbus output=%s)", result)
+            self._log_debug_kv("wayland gdbus output", {"output": result})
             return True
 
         payload_str = match.group(1).encode("utf-8").decode("unicode_escape")
         if not payload_str or payload_str == "{}":
-            if self._ticks % 10 == 0:
-                logger.info("WINDOW_WATCHER heartbeat (no active window)")
+            self._log_debug_kv(
+                "wayland no active window",
+                {"payload": payload_str},
+            )
             return True
 
         try:
             data = json.loads(payload_str)
         except Exception:
-            if self._ticks % 10 == 0:
-                logger.info("WINDOW_WATCHER heartbeat (bad json=%s)", payload_str)
+            self._log_debug_kv("wayland bad json", {"payload": payload_str})
             return True
 
         title = data.get("title", "")
@@ -1112,6 +1226,18 @@ class ActiveWindowWatcher:
         pid = data.get("pid", 0)
 
         current = (title, wm_class, app_id, pid)
+        self._log_debug_kv(
+            "wayland gdbus values",
+            {
+                "title": title,
+                "wm_class": wm_class,
+                "app_id": app_id,
+                "pid": pid,
+                "current": current,
+                "last": self._last,
+                "raw": payload_str,
+            },
+        )
         if current != self._last:
             self._last = current
             logger.info(
