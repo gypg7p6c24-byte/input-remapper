@@ -135,6 +135,25 @@ def _parse_appmanifest(path: str) -> Optional[Tuple[str, str]]:
     return appid, name
 
 
+def _parse_appmanifest_details(path: str) -> Optional[Tuple[str, str, str]]:
+    try:
+        with open(path, "r", encoding="utf-8", errors="ignore") as file:
+            contents = file.read()
+    except OSError:
+        return None
+
+    name_match = re.search(r'"name"\s*"([^"]+)"', contents)
+    appid_match = re.search(r'"appid"\s*"(\d+)"', contents)
+    dir_match = re.search(r'"installdir"\s*"([^"]+)"', contents)
+    if not name_match or not dir_match:
+        return None
+
+    name = _unescape_vdf(name_match.group(1))
+    appid = appid_match.group(1) if appid_match else ""
+    installdir = _unescape_vdf(dir_match.group(1))
+    return appid, name, installdir
+
+
 def get_steam_installed_games() -> List[Tuple[str, str]]:
     """Return a list of (appid, name) for locally installed Steam games."""
     games: dict[str, str] = {}
@@ -163,3 +182,40 @@ def get_steam_installed_games() -> List[Tuple[str, str]]:
                 games[appid] = name
 
     return sorted(games.items(), key=lambda item: item[1].lower())
+
+
+def get_steam_installed_game_paths() -> List[Tuple[str, str, str]]:
+    """Return a list of (appid, name, install_path) for locally installed Steam games."""
+    games: dict[str, Tuple[str, str]] = {}
+
+    library_dirs = _steam_library_dirs()
+
+    for library in library_dirs:
+        try:
+            entries = os.listdir(library)
+        except OSError:
+            continue
+
+        for entry in entries:
+            if not entry.startswith("appmanifest_") or not entry.endswith(".acf"):
+                continue
+
+            appid_from_name = entry[len("appmanifest_") : -len(".acf")]
+            manifest_path = os.path.join(library, entry)
+            parsed = _parse_appmanifest_details(manifest_path)
+            if parsed is None:
+                continue
+
+            appid, name, installdir = parsed
+            appid = appid or appid_from_name
+            if not appid or not installdir:
+                continue
+
+            install_path = os.path.join(library, "common", installdir)
+            games[appid] = (name, install_path)
+
+    result: List[Tuple[str, str, str]] = []
+    for appid, (name, install_path) in games.items():
+        result.append((appid, name, install_path))
+
+    return sorted(result, key=lambda item: item[1].lower())

@@ -38,6 +38,7 @@ from inputremapper.gui.components.editor import (
     AutoloadSwitch,
     LinkGameDropdown,
     ActiveWindowWatcher,
+    SteamProcessWatcher,
     ReleaseCombinationSwitch,
     CombinationListbox,
     AnalogInputSwitch,
@@ -176,6 +177,7 @@ class UserInterface:
             message_broker, controller, self.get("preset_game_link_combo")
         )
         ActiveWindowWatcher()
+        SteamProcessWatcher()
         ReleaseCombinationSwitch(
             message_broker, controller, self.get("release-combination-switch")
         )

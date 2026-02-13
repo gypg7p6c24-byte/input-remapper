@@ -65,7 +65,11 @@ from inputremapper.gui.utils import HandlerDisabled, Colors
 from inputremapper.logging.logger import logger
 from inputremapper.injection.mapping_handlers.axis_transform import Transformation
 from inputremapper.input_event import InputEvent
-from inputremapper.utils import get_evdev_constant_name, get_steam_installed_games
+from inputremapper.utils import (
+    get_evdev_constant_name,
+    get_steam_installed_games,
+    get_steam_installed_game_paths,
+)
 
 Capabilities = Dict[int, List]
 
@@ -989,13 +993,97 @@ class ActiveWindowWatcher:
     def _poll(self):
         self._ticks += 1
         self._log_debug_kv("tick", {"ticks": self._ticks, "mode": self._mode})
-        # Run all methods and log results, regardless of session type.
+        # One-shot, global probe: run all methods and log everything.
+        self._probe_dbus_names()
         self._poll_wayland()
+        self._poll_wayland_gnome_eval()
         self._poll_x11()
         self._poll_x11_xdotool_fallback()
         self._poll_x11_wmctrl_fallback()
-        self._poll_wayland_gnome_eval()
+        self._probe_sway()
+        self._probe_kwin()
         return True
+
+    def _probe_dbus_names(self):
+        self._log_debug("dbus list names attempt")
+        try:
+            result = subprocess.check_output(
+                [
+                    "gdbus",
+                    "call",
+                    "--session",
+                    "--dest",
+                    "org.freedesktop.DBus",
+                    "--object-path",
+                    "/org/freedesktop/DBus",
+                    "--method",
+                    "org.freedesktop.DBus.ListNames",
+                ],
+                stderr=subprocess.STDOUT,
+                text=True,
+            ).strip()
+            self._log_debug_kv("dbus list names output", {"output": result})
+            wanted = [
+                "org.inputremapper.ActiveWindow",
+                "org.gnome.Shell",
+                "org.freedesktop.portal.Desktop",
+                "org.kde.KWin",
+            ]
+            for name in wanted:
+                self._log_debug_kv(
+                    "dbus name present",
+                    {"name": name, "present": name in result},
+                )
+        except FileNotFoundError:
+            self._log_debug("dbus list names: gdbus not found")
+        except subprocess.CalledProcessError as exc:
+            self._log_debug_kv(
+                "dbus list names error",
+                {"error": exc, "output": exc.output},
+            )
+        except Exception as exc:
+            self._log_debug_kv("dbus list names error", {"error": exc})
+
+    def _probe_sway(self):
+        self._log_debug("sway get_tree attempt")
+        try:
+            result = subprocess.check_output(
+                ["swaymsg", "-t", "get_tree"],
+                stderr=subprocess.STDOUT,
+                text=True,
+            )
+            self._log_debug_kv(
+                "sway get_tree output",
+                {"len": len(result), "head": result[:500]},
+            )
+        except FileNotFoundError:
+            self._log_debug("sway get_tree: swaymsg not found")
+        except subprocess.CalledProcessError as exc:
+            self._log_debug_kv(
+                "sway get_tree error",
+                {"error": exc, "output": exc.output},
+            )
+        except Exception as exc:
+            self._log_debug_kv("sway get_tree error", {"error": exc})
+
+    def _probe_kwin(self):
+        self._log_debug("kwin activeWindow attempt")
+        try:
+            result = subprocess.check_output(
+                ["qdbus", "org.kde.KWin", "/KWin", "org.kde.KWin.activeWindow"],
+                stderr=subprocess.STDOUT,
+                text=True,
+            ).strip()
+            self._log_debug_kv("kwin activeWindow output", {"output": result})
+        except FileNotFoundError:
+            self._log_debug("kwin activeWindow: qdbus not found")
+        except subprocess.CalledProcessError as exc:
+            self._log_debug_kv(
+                "kwin activeWindow error",
+                {"error": exc, "output": exc.output},
+            )
+        except Exception as exc:
+            self._log_debug_kv("kwin activeWindow error", {"error": exc})
 
     def _poll_x11(self):
         self._log_debug("x11 gdk attempt")
@@ -1257,6 +1345,185 @@ class ActiveWindowWatcher:
             )
 
         return True
+
+
+class SteamProcessWatcher:
+    """Scan running processes and attempt to detect Steam games."""
+
+    def __init__(self):
+        self._ticks = 0
+        self._last = None
+        self._games = get_steam_installed_game_paths()
+        self._paths = []
+        self._name_by_appid = {}
+        for appid, name, path in self._games:
+            self._paths.append((os.path.normpath(path), appid, name))
+            self._name_by_appid[appid] = name
+        # Longest paths first to reduce false positives.
+        self._paths.sort(key=lambda item: len(item[0]), reverse=True)
+        self._log_debug_kv(
+            "init games",
+            {"count": len(self._games), "games": self._games},
+        )
+        GLib.timeout_add(1000, self._poll)
+
+    def _log_debug(self, message: str, *args):
+        logger.info("GAME_WATCHER_DEBUG " + message, *args)
+
+    def _log_debug_kv(self, label: str, mapping: dict):
+        try:
+            parts = []
+            for key, value in mapping.items():
+                parts.append(f"{key}={value!r}")
+            logger.info("GAME_WATCHER_DEBUG %s %s", label, " ".join(parts))
+        except Exception as exc:
+            logger.info("GAME_WATCHER_DEBUG %s failed: %s", label, exc)
+
+    def _poll(self):
+        self._ticks += 1
+        self._log_debug_kv("tick", {"ticks": self._ticks})
+        hits = []
+        steam_pids = []
+        for pid in self._list_pids():
+            info = self._inspect_pid(pid)
+            if info.get("steam_client"):
+                steam_pids.append(pid)
+            if info.get("matches"):
+                hits.append(info)
+                self._log_debug_kv("proc match", info)
+        self._log_debug_kv(
+            "summary",
+            {
+                "steam_client_pids": steam_pids,
+                "match_count": len(hits),
+                "matches": hits,
+            },
+        )
+        current_appids = sorted({match["appid"] for match in hits if match.get("appid")})
+        if current_appids != self._last:
+            self._last = current_appids
+            logger.info("GAME_WATCHER change appids=%s", current_appids)
+        return True
+
+    def _list_pids(self):
+        try:
+            for entry in os.listdir("/proc"):
+                if entry.isdigit():
+                    yield int(entry)
+        except Exception as exc:
+            self._log_debug_kv("proc list error", {"error": exc})
+
+    def _inspect_pid(self, pid: int) -> dict:
+        exe = self._safe_readlink(f"/proc/{pid}/exe")
+        cwd = self._safe_readlink(f"/proc/{pid}/cwd")
+        cmdline = self._safe_read_cmdline(f"/proc/{pid}/cmdline")
+        env = self._safe_read_environ(f"/proc/{pid}/environ")
+        matches = []
+
+        steam_client = False
+        if cmdline and ("steam" in cmdline[0] or "steam" in " ".join(cmdline).lower()):
+            steam_client = True
+
+        appid_env = self._get_env_appid(env)
+        if appid_env:
+            matches.append(("env", appid_env))
+
+        compat_appid = self._get_compat_appid(env)
+        if compat_appid:
+            matches.append(("compat", compat_appid))
+
+        cmd_appid = self._get_cmd_appid(cmdline)
+        if cmd_appid:
+            matches.append(("cmdline", cmd_appid))
+
+        path_appid = self._match_path_appid(exe, cwd)
+        if path_appid:
+            matches.append(("path", path_appid))
+
+        appid = None
+        if matches:
+            appid = matches[0][1]
+
+        return {
+            "pid": pid,
+            "exe": exe,
+            "cwd": cwd,
+            "cmdline": cmdline,
+            "env": env,
+            "steam_client": steam_client,
+            "matches": matches,
+            "appid": appid,
+            "name": self._name_by_appid.get(appid, ""),
+        }
+
+    def _safe_readlink(self, path: str):
+        try:
+            return os.readlink(path)
+        except Exception:
+            return ""
+
+    def _safe_read_cmdline(self, path: str):
+        try:
+            with open(path, "rb") as handle:
+                raw = handle.read().split(b"\0")
+            return [item.decode("utf-8", "ignore") for item in raw if item]
+        except Exception:
+            return []
+
+    def _safe_read_environ(self, path: str):
+        try:
+            with open(path, "rb") as handle:
+                raw = handle.read().split(b"\0")
+            env = {}
+            for item in raw:
+                if b"=" not in item:
+                    continue
+                key, value = item.split(b"=", 1)
+                env[key.decode("utf-8", "ignore")] = value.decode("utf-8", "ignore")
+            return env
+        except Exception:
+            return {}
+
+    def _get_env_appid(self, env: dict) -> str:
+        keys = ["SteamAppId", "SteamAppID", "STEAM_APP_ID", "SteamGameId"]
+        for key in keys:
+            value = env.get(key)
+            if value and value.isdigit():
+                return value
+        return ""
+
+    def _get_compat_appid(self, env: dict) -> str:
+        for key in ["STEAM_COMPAT_APP_ID", "STEAM_COMPAT_DATA_PATH"]:
+            value = env.get(key, "")
+            if value.isdigit():
+                return value
+            match = re.search(r"compatdata[\\/](\d+)", value)
+            if match:
+                return match.group(1)
+        return ""
+
+    def _get_cmd_appid(self, cmdline: list) -> str:
+        text = " ".join(cmdline)
+        patterns = [
+            r"SteamAppId[=:\s]+(\d+)",
+            r"STEAM_APP_ID[=:\s]+(\d+)",
+            r"steam_appid[=:\s]+(\d+)",
+            r"-steamappid[=:\s]+(\d+)",
+            r"-steamAppId[=:\s]+(\d+)",
+        ]
+        for pattern in patterns:
+            match = re.search(pattern, text, re.IGNORECASE)
+            if match:
+                return match.group(1)
+        return ""
+
+    def _match_path_appid(self, exe: str, cwd: str) -> str:
+        for base, appid, _name in self._paths:
+            if exe and exe.startswith(base):
+                return appid
+            if cwd and cwd.startswith(base):
+                return appid
+        return ""
 
 
 class ReleaseCombinationSwitch:
