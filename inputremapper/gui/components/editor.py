@@ -923,13 +923,13 @@ class ActiveWindowWatcher:
         if not display or not screen:
             if self._ticks % 10 == 0:
                 logger.info("WINDOW_WATCHER heartbeat (no display/screen)")
-            return True
+            return self._poll_x11_xdotool_fallback()
 
         window = screen.get_active_window()
         if window is None:
             if self._ticks % 10 == 0:
                 logger.info("WINDOW_WATCHER heartbeat (no active window)")
-            return True
+            return self._poll_x11_xdotool_fallback()
 
         title = window.get_title() or ""
         wm_class = window.get_wm_class() or ("", "")
@@ -956,6 +956,64 @@ class ActiveWindowWatcher:
                 wm_class,
                 xid,
             )
+
+        return True
+
+    def _poll_x11_xdotool_fallback(self):
+        try:
+            xid = subprocess.check_output(
+                ["xdotool", "getactivewindow"],
+                stderr=subprocess.STDOUT,
+                text=True,
+            ).strip()
+            if not xid:
+                if self._ticks % 10 == 0:
+                    logger.info("WINDOW_WATCHER heartbeat (xdotool no xid)")
+                return True
+
+            title = subprocess.check_output(
+                ["xdotool", "getwindowname", xid],
+                stderr=subprocess.STDOUT,
+                text=True,
+            ).strip()
+            try:
+                wm_class = subprocess.check_output(
+                    ["xdotool", "getwindowclassname", xid],
+                    stderr=subprocess.STDOUT,
+                    text=True,
+                ).strip()
+            except subprocess.CalledProcessError:
+                wm_class = ""
+
+            current = (title, wm_class, xid)
+            if current != self._last:
+                self._last = current
+                logger.info(
+                    "WINDOW_WATCHER change title=%s wm_class=%s xid=%s (xdotool)",
+                    title,
+                    wm_class,
+                    xid,
+                )
+            elif self._ticks % 10 == 0:
+                logger.info(
+                    "WINDOW_WATCHER heartbeat title=%s wm_class=%s xid=%s (xdotool)",
+                    title,
+                    wm_class,
+                    xid,
+                )
+        except FileNotFoundError:
+            if self._ticks % 10 == 0:
+                logger.info("WINDOW_WATCHER heartbeat (xdotool not found)")
+        except subprocess.CalledProcessError as exc:
+            if self._ticks % 10 == 0:
+                logger.info(
+                    "WINDOW_WATCHER heartbeat (xdotool error=%s output=%s)",
+                    exc,
+                    exc.output,
+                )
+        except Exception as exc:
+            if self._ticks % 10 == 0:
+                logger.info("WINDOW_WATCHER heartbeat (xdotool error=%s)", exc)
 
         return True
 

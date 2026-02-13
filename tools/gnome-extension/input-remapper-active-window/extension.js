@@ -1,4 +1,5 @@
 import Gio from 'gi://Gio';
+import { Extension } from 'resource:///org/gnome/shell/extensions/extension.js';
 
 const IFACE_XML = `<node>
   <interface name="org.inputremapper.ActiveWindow">
@@ -35,41 +36,37 @@ class ActiveWindowService {
   }
 }
 
-let _service = null;
-let _exported = null;
-let _nameId = 0;
-
-export function init() {}
-
-export function enable() {
-  try {
-    _service = new ActiveWindowService();
-    _exported = Gio.DBusExportedObject.wrapJSObject(IFACE_XML, _service);
-    _exported.export(Gio.DBus.session, "/org/inputremapper/ActiveWindow");
-    _nameId = Gio.bus_own_name(
-      Gio.BusType.SESSION,
-      "org.inputremapper.ActiveWindow",
-      Gio.BusNameOwnerFlags.NONE,
-      null,
-      null
-    );
-  } catch (e) {
-    logError(e, "input-remapper-active-window enable failed");
+export default class InputRemapperActiveWindowExtension extends Extension {
+  enable() {
+    try {
+      this._service = new ActiveWindowService();
+      this._exported = Gio.DBusExportedObject.wrapJSObject(IFACE_XML, this._service);
+      this._exported.export(Gio.DBus.session, "/org/inputremapper/ActiveWindow");
+      this._nameId = Gio.bus_own_name(
+        Gio.BusType.SESSION,
+        "org.inputremapper.ActiveWindow",
+        Gio.BusNameOwnerFlags.NONE,
+        null,
+        null
+      );
+    } catch (e) {
+      logError(e, "input-remapper-active-window enable failed");
+    }
   }
-}
 
-export function disable() {
-  try {
-    if (_exported) {
-      _exported.unexport();
-      _exported = null;
+  disable() {
+    try {
+      if (this._exported) {
+        this._exported.unexport();
+        this._exported = null;
+      }
+      if (this._nameId) {
+        Gio.bus_unown_name(this._nameId);
+        this._nameId = 0;
+      }
+      this._service = null;
+    } catch (e) {
+      logError(e, "input-remapper-active-window disable failed");
     }
-    if (_nameId) {
-      Gio.bus_unown_name(_nameId);
-      _nameId = 0;
-    }
-    _service = null;
-  } catch (e) {
-    logError(e, "input-remapper-active-window disable failed");
   }
 }
