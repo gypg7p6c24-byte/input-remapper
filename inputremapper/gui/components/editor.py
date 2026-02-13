@@ -24,7 +24,7 @@
 from __future__ import annotations
 
 from collections import defaultdict
-from typing import List, Optional, Dict, Union, Callable, Literal, Set
+from typing import List, Optional, Dict, Union, Callable, Literal, Set, TYPE_CHECKING
 
 import cairo
 from evdev.ecodes import (
@@ -70,6 +70,9 @@ from inputremapper.utils import (
     get_steam_installed_games,
     get_steam_installed_game_paths,
 )
+
+if TYPE_CHECKING:
+    from inputremapper.gui.data_manager import DataManager
 
 Capabilities = Dict[int, List]
 
@@ -1489,9 +1492,10 @@ class ActiveWindowWatcher:
 class SteamProcessWatcher:
     """Scan running processes and attempt to detect Steam games."""
 
-    def __init__(self):
+    def __init__(self, on_change: Optional[Callable[[List[str]], None]] = None):
         self._ticks = 0
         self._last = None
+        self._on_change = on_change
         self._games = get_steam_installed_game_paths()
         self._paths = []
         self._name_by_appid = {}
@@ -1542,6 +1546,11 @@ class SteamProcessWatcher:
         if current_appids != self._last:
             self._last = current_appids
             logger.info("GAME_WATCHER change appids=%s", current_appids)
+            if self._on_change:
+                try:
+                    self._on_change(current_appids)
+                except Exception as exc:
+                    self._log_debug_kv("callback error", {"error": exc})
         return True
 
     def _list_pids(self):
@@ -1640,6 +1649,11 @@ class SteamProcessWatcher:
         for key in keys:
             value = env.get(key)
             if value and value.isdigit():
+                if len(value) > 10:
+                    try:
+                        return str(int(value) & 0xFFFFFFFF)
+                    except Exception:
+                        return value
                 return value
         return ""
 
@@ -1667,6 +1681,7 @@ class SteamProcessWatcher:
             r"-app-id[=:\s]+(\d+)",
             r"-gameid[=:\s]+(\d+)",
             r"-gameId[=:\s]+(\d+)",
+            r"rungameid[=/](\d+)",
         ]
         for pattern in patterns:
             match = re.search(pattern, text, re.IGNORECASE)
@@ -1681,6 +1696,12 @@ class SteamProcessWatcher:
         return ""
 
     def _match_path_appid(self, exe: str, cwd: str, cmd_text: str) -> str:
+        for text in (exe, cwd, cmd_text):
+            if not text:
+                continue
+            match = re.search(r"compatdata[\\/](\d+)", text)
+            if match:
+                return match.group(1)
         for base, appid, _name in self._paths:
             if exe and exe.startswith(base):
                 return appid
@@ -1689,6 +1710,78 @@ class SteamProcessWatcher:
             if cmd_text and base in cmd_text:
                 return appid
         return ""
+
+
+class GameAutoSwitcher:
+    """Apply presets based on detected game appids."""
+
+    def __init__(self, data_manager: "DataManager"):
+        self._data_manager = data_manager
+        self._last_appids: List[str] = []
+        self._last_applied: Dict[str, Optional[str]] = {}
+        self._watcher = SteamProcessWatcher(self._on_appids)
+        GLib.timeout_add(2000, self._periodic_apply)
+
+    def _log(self, message: str, *args):
+        logger.info("GAME_AUTOSWITCH " + message, *args)
+
+    def _on_appids(self, appids: List[str]):
+        if appids == self._last_appids:
+            return
+        self._last_appids = list(appids)
+        self._apply_for_groups(appids)
+
+    def _periodic_apply(self):
+        if self._last_appids:
+            self._apply_for_groups(self._last_appids)
+        return True
+
+    def _apply_for_groups(self, appids: List[str]):
+        try:
+            group_keys = self._data_manager.get_group_keys()
+        except Exception as exc:
+            self._log("group lookup failed error=%s", exc)
+            return
+
+        for group_key in group_keys:
+            bindings = self._data_manager.get_game_bindings_for_group(group_key)
+            if not bindings:
+                # No game bindings configured for this group: do nothing.
+                continue
+
+            desired_preset: Optional[str] = None
+            desired_appid: Optional[str] = None
+            for appid in appids:
+                preset = bindings.get(appid)
+                if preset:
+                    desired_preset = preset
+                    desired_appid = appid
+                    break
+
+            if desired_preset is None:
+                desired_preset = self._data_manager.get_default_preset_for_group(
+                    group_key
+                )
+
+            if self._last_applied.get(group_key) == desired_preset:
+                continue
+
+            if desired_preset:
+                ok = self._data_manager.start_injecting_group(
+                    group_key, desired_preset
+                )
+                self._last_applied[group_key] = desired_preset
+                self._log(
+                    "apply group=%s appid=%s preset=%s ok=%s",
+                    group_key,
+                    desired_appid,
+                    desired_preset,
+                    ok,
+                )
+            else:
+                self._data_manager.stop_injecting_group(group_key)
+                self._last_applied[group_key] = None
+                self._log("stop group=%s (no active appid)", group_key)
 
 
 class ReleaseCombinationSwitch:

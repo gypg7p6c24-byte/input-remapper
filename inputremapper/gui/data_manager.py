@@ -222,6 +222,14 @@ class DataManager:
             self.active_group.key, self.active_preset.name
         )
 
+    def get_game_bindings_for_group(self, group_key: str) -> dict:
+        """Get all game bindings for a group."""
+        return self._config.get_game_bindings(group_key)
+
+    def get_default_preset_for_group(self, group_key: str) -> Optional[str]:
+        """Get the default preset for a group."""
+        return self._config.get_default_preset(group_key)
+
     def set_game_binding(self, game_id: Optional[str]):
         """Bind the active preset to a game id (or remove the binding)."""
         if not self.active_preset or not self.active_group:
@@ -585,6 +593,15 @@ class DataManager:
         self.do_when_injector_state(
             {InjectorState.STOPPED}, self.publish_injector_state
         )
+
+    def stop_injecting_group(self, group_key: str) -> None:
+        """Stop injecting for a specific group."""
+        self._daemon.stop_injecting(group_key)
+
+    def start_injecting_group(self, group_key: str, preset_name: str) -> bool:
+        """Start injecting a preset for a specific group."""
+        self._daemon.set_config_dir(self._config.get_dir())
+        return self._daemon.start_injecting(group_key, preset_name)
 
     def start_injecting(self) -> bool:
         """Start injecting the active preset for the active group.
