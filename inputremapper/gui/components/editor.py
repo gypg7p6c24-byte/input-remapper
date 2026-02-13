@@ -754,9 +754,11 @@ class ActiveWindowWatcher:
         self._mode = os.environ.get("XDG_SESSION_TYPE", "").lower()
         self._last_state = None
         self._last_error = None
+        self._a11y_checked = False
         logger.info("WINDOW_WATCHER started (poll=1000ms)")
         if self._mode == "wayland":
             self._ensure_gnome_extension()
+            self._ensure_atspi_enabled()
         GLib.timeout_add(1000, self._poll)
 
     def _ensure_gnome_extension(self):
@@ -814,6 +816,46 @@ class ActiveWindowWatcher:
         except Exception as exc:
             logger.info("WINDOW_WATCHER extension enable failed: %s", exc)
             self._log_extension_state(uuid)
+
+    def _ensure_atspi_enabled(self):
+        if self._a11y_checked:
+            return
+        self._a11y_checked = True
+        try:
+            current = subprocess.check_output(
+                [
+                    "gsettings",
+                    "get",
+                    "org.gnome.desktop.interface",
+                    "toolkit-accessibility",
+                ],
+                stderr=subprocess.STDOUT,
+                text=True,
+            ).strip()
+            if current.lower() == "true":
+                return
+            subprocess.check_output(
+                [
+                    "gsettings",
+                    "set",
+                    "org.gnome.desktop.interface",
+                    "toolkit-accessibility",
+                    "true",
+                ],
+                stderr=subprocess.STDOUT,
+                text=True,
+            )
+            logger.info("WINDOW_WATCHER enabled toolkit-accessibility via gsettings")
+        except FileNotFoundError:
+            logger.info("WINDOW_WATCHER gsettings not found; cannot enable atspi")
+        except subprocess.CalledProcessError as exc:
+            logger.info(
+                "WINDOW_WATCHER gsettings enable failed: %s output=%s",
+                exc,
+                exc.output,
+            )
+        except Exception as exc:
+            logger.info("WINDOW_WATCHER gsettings enable failed: %s", exc)
 
     def _log_extension_state(self, uuid: str) -> None:
         try:
