@@ -800,6 +800,46 @@ class ActiveWindowWatcher:
                 os.path.exists(meta_path),
                 os.path.exists(ext_path),
             )
+            try:
+                import hashlib
+
+                def _hash(path: str) -> str:
+                    with open(path, "rb") as handle:
+                        return hashlib.sha256(handle.read()).hexdigest()
+
+                src_meta = os.path.join(source_dir, "metadata.json")
+                src_ext = os.path.join(source_dir, "extension.js")
+                if os.path.exists(src_meta) and os.path.exists(meta_path):
+                    logger.info(
+                        "WINDOW_WATCHER meta sha src=%s dst=%s",
+                        _hash(src_meta),
+                        _hash(meta_path),
+                    )
+                if os.path.exists(src_ext) and os.path.exists(ext_path):
+                    logger.info(
+                        "WINDOW_WATCHER ext sha src=%s dst=%s",
+                        _hash(src_ext),
+                        _hash(ext_path),
+                    )
+            except Exception as exc:
+                logger.info("WINDOW_WATCHER extension hash failed: %s", exc)
+
+            try:
+                cache_dir = os.path.join(
+                    os.path.expanduser("~"),
+                    ".cache",
+                    "gnome-shell",
+                    "extensions",
+                    uuid,
+                )
+                if os.path.isdir(cache_dir):
+                    shutil.rmtree(cache_dir, ignore_errors=True)
+                    logger.info(
+                        "WINDOW_WATCHER extension cache cleared: %s",
+                        cache_dir,
+                    )
+            except Exception as exc:
+                logger.info("WINDOW_WATCHER extension cache clear failed: %s", exc)
         except Exception as exc:
             logger.info("WINDOW_WATCHER extension install failed: %s", exc)
             return

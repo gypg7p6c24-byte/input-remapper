@@ -3,5 +3,5 @@
   "name": "Input Remapper Active Window",
   "description": "Expose active window details over DBus for Input Remapper (Wayland).",
   "shell-version": ["42", "43", "44", "45", "46", "47", "48", "49"],
-  "version": 1
+  "version": 2
 }
