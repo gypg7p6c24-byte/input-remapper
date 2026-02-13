@@ -995,6 +995,7 @@ class ActiveWindowWatcher:
         self._log_debug_kv("tick", {"ticks": self._ticks, "mode": self._mode})
         # One-shot, global probe: run all methods and log everything.
         self._probe_dbus_names()
+        self._probe_gnome_introspect()
         self._poll_wayland()
         self._poll_wayland_gnome_eval()
         self._poll_x11()
@@ -1043,6 +1044,75 @@ class ActiveWindowWatcher:
             )
         except Exception as exc:
             self._log_debug_kv("dbus list names error", {"error": exc})
+
+    def _probe_gnome_introspect(self):
+        self._log_debug("gnome introspect attempt")
+        try:
+            result = subprocess.check_output(
+                [
+                    "gdbus",
+                    "introspect",
+                    "--session",
+                    "--dest",
+                    "org.gnome.Shell.Introspect",
+                    "--object-path",
+                    "/org/gnome/Shell/Introspect",
+                ],
+                stderr=subprocess.STDOUT,
+                text=True,
+            ).strip()
+            self._log_debug_kv("gnome introspect", {"output": result})
+        except subprocess.CalledProcessError as exc:
+            self._log_debug_kv(
+                "gnome introspect error",
+                {"error": exc, "output": exc.output},
+            )
+            return
+        except FileNotFoundError:
+            self._log_debug("gnome introspect: gdbus not found")
+            return
+        except Exception as exc:
+            self._log_debug_kv("gnome introspect error", {"error": exc})
+            return
+
+        # Try common methods; log output/errors for each.
+        methods = [
+            "GetWindows",
+            "GetRunningApplications",
+            "GetWindow",
+            "GetActiveWindow",
+        ]
+        for method in methods:
+            try:
+                output = subprocess.check_output(
+                    [
+                        "gdbus",
+                        "call",
+                        "--session",
+                        "--dest",
+                        "org.gnome.Shell.Introspect",
+                        "--object-path",
+                        "/org/gnome/Shell/Introspect",
+                        "--method",
+                        f"org.gnome.Shell.Introspect.{method}",
+                    ],
+                    stderr=subprocess.STDOUT,
+                    text=True,
+                ).strip()
+                self._log_debug_kv(
+                    "gnome introspect call",
+                    {"method": method, "output": output},
+                )
+            except subprocess.CalledProcessError as exc:
+                self._log_debug_kv(
+                    "gnome introspect call error",
+                    {"method": method, "error": exc, "output": exc.output},
+                )
+            except Exception as exc:
+                self._log_debug_kv(
+                    "gnome introspect call error",
+                    {"method": method, "error": exc},
+                )
 
     def _probe_sway(self):
         self._log_debug("sway get_tree attempt")
@@ -1421,7 +1491,13 @@ class SteamProcessWatcher:
         matches = []
 
         steam_client = False
-        if cmdline and ("steam" in cmdline[0] or "steam" in " ".join(cmdline).lower()):
+        cmd_text = " ".join(cmdline)
+        if cmdline and (
+            "steam" in cmdline[0].lower()
+            or "steam" in cmd_text.lower()
+            or "pressure-vessel" in cmd_text.lower()
+            or "reaper" in cmd_text.lower()
+        ):
             steam_client = True
 
         appid_env = self._get_env_appid(env)
@@ -1436,7 +1512,7 @@ class SteamProcessWatcher:
         if cmd_appid:
             matches.append(("cmdline", cmd_appid))
 
-        path_appid = self._match_path_appid(exe, cwd)
+        path_appid = self._match_path_appid(exe, cwd, cmd_text)
         if path_appid:
             matches.append(("path", path_appid))
 
@@ -1444,17 +1520,23 @@ class SteamProcessWatcher:
         if matches:
             appid = matches[0][1]
 
-        return {
+        info = {
             "pid": pid,
             "exe": exe,
             "cwd": cwd,
             "cmdline": cmdline,
             "env": env,
+            "env_steam": {k: v for k, v in env.items() if "STEAM" in k or "Steam" in k},
             "steam_client": steam_client,
             "matches": matches,
             "appid": appid,
             "name": self._name_by_appid.get(appid, ""),
         }
+
+        if steam_client and not matches:
+            self._log_debug_kv("steam proc", info)
+
+        return info
 
     def _safe_readlink(self, path: str):
         try:
@@ -1510,18 +1592,32 @@ class SteamProcessWatcher:
             r"steam_appid[=:\s]+(\d+)",
             r"-steamappid[=:\s]+(\d+)",
             r"-steamAppId[=:\s]+(\d+)",
+            r"--appid[=:\s]+(\d+)",
+            r"-appid[=:\s]+(\d+)",
+            r"--app-id[=:\s]+(\d+)",
+            r"-app-id[=:\s]+(\d+)",
+            r"-gameid[=:\s]+(\d+)",
+            r"-gameId[=:\s]+(\d+)",
         ]
         for pattern in patterns:
             match = re.search(pattern, text, re.IGNORECASE)
             if match:
-                return match.group(1)
+                value = match.group(1)
+                if len(value) > 10:
+                    try:
+                        return str(int(value) & 0xFFFFFFFF)
+                    except Exception:
+                        return value
+                return value
         return ""
 
-    def _match_path_appid(self, exe: str, cwd: str) -> str:
+    def _match_path_appid(self, exe: str, cwd: str, cmd_text: str) -> str:
         for base, appid, _name in self._paths:
             if exe and exe.startswith(base):
                 return appid
             if cwd and cwd.startswith(base):
+                return appid
+            if cmd_text and base in cmd_text:
                 return appid
         return ""
 
