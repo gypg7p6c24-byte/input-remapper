@@ -746,54 +746,18 @@ class LinkGameDropdown:
 
 
 class ActiveWindowWatcher:
-    """Poll the active window and log changes (debug-only helper)."""
+    """Poll the active window (GNOME Wayland) and emit changes."""
 
-    def __init__(self):
-        self._last = None
+    def __init__(self, on_change: Optional[Callable[[dict], None]] = None):
+        self._on_change = on_change
         self._ticks = 0
         self._mode = os.environ.get("XDG_SESSION_TYPE", "").lower()
+        self._last_state = None
+        self._last_error = None
         logger.info("WINDOW_WATCHER started (poll=1000ms)")
-        self._log_env()
         if self._mode == "wayland":
             self._ensure_gnome_extension()
         GLib.timeout_add(1000, self._poll)
-
-    def _log_env(self):
-        self._log_debug_kv(
-            "env",
-            {
-                "XDG_SESSION_TYPE": os.environ.get("XDG_SESSION_TYPE", ""),
-                "XDG_CURRENT_DESKTOP": os.environ.get("XDG_CURRENT_DESKTOP", ""),
-                "XDG_SESSION_DESKTOP": os.environ.get("XDG_SESSION_DESKTOP", ""),
-                "GNOME_SHELL_SESSION_MODE": os.environ.get(
-                    "GNOME_SHELL_SESSION_MODE", ""
-                ),
-                "WAYLAND_DISPLAY": os.environ.get("WAYLAND_DISPLAY", ""),
-                "DISPLAY": os.environ.get("DISPLAY", ""),
-            },
-        )
-        self._log_debug_kv(
-            "cmds",
-            {
-                "gdbus": shutil.which("gdbus"),
-                "gnome-extensions": shutil.which("gnome-extensions"),
-                "xdotool": shutil.which("xdotool"),
-                "wmctrl": shutil.which("wmctrl"),
-                "swaymsg": shutil.which("swaymsg"),
-            },
-        )
-
-    def _log_debug(self, message: str, *args):
-        logger.info("WINDOW_WATCHER_DEBUG " + message, *args)
-
-    def _log_debug_kv(self, label: str, mapping: dict):
-        try:
-            parts = []
-            for key, value in mapping.items():
-                parts.append(f"{key}={value!r}")
-            logger.info("WINDOW_WATCHER_DEBUG %s %s", label, " ".join(parts))
-        except Exception as exc:
-            logger.info("WINDOW_WATCHER_DEBUG %s failed: %s", label, exc)
 
     def _ensure_gnome_extension(self):
         uuid = "input-remapper-active-window@inputremapper"
@@ -811,22 +775,10 @@ class ActiveWindowWatcher:
 
         desktop = os.environ.get("XDG_CURRENT_DESKTOP", "")
         session_desktop = os.environ.get("XDG_SESSION_DESKTOP", "")
-        session_mode = os.environ.get("GNOME_SHELL_SESSION_MODE", "")
-        self._log_debug(
-            "env desktop=%s session_desktop=%s session_mode=%s",
-            desktop,
-            session_desktop,
-            session_mode,
-        )
         if "gnome" not in desktop.lower() and "gnome" not in session_desktop.lower():
-            logger.info("WINDOW_WATCHER unsupported desktop for extension")
+            logger.info("WINDOW_WATCHER skipped (non-GNOME desktop)")
             return
 
-        self._log_debug(
-            "extension source_dir=%s exists=%s",
-            source_dir,
-            os.path.isdir(source_dir),
-        )
         if not os.path.isdir(source_dir):
             logger.info("WINDOW_WATCHER extension source missing: %s", source_dir)
             return
@@ -838,84 +790,9 @@ class ActiveWindowWatcher:
                 dst = os.path.join(target_dir, filename)
                 if os.path.exists(src):
                     shutil.copy2(src, dst)
-            meta_path = os.path.join(target_dir, "metadata.json")
-            ext_path = os.path.join(target_dir, "extension.js")
-            self._log_debug(
-                "extension installed to %s meta=%s ext=%s",
-                target_dir,
-                os.path.exists(meta_path),
-                os.path.exists(ext_path),
-            )
-            try:
-                import hashlib
-
-                def _hash(path: str) -> str:
-                    with open(path, "rb") as handle:
-                        return hashlib.sha256(handle.read()).hexdigest()
-
-                src_meta = os.path.join(source_dir, "metadata.json")
-                src_ext = os.path.join(source_dir, "extension.js")
-                if os.path.exists(src_meta) and os.path.exists(meta_path):
-                    self._log_debug(
-                        "meta sha src=%s dst=%s",
-                        _hash(src_meta),
-                        _hash(meta_path),
-                    )
-                if os.path.exists(src_ext) and os.path.exists(ext_path):
-                    self._log_debug(
-                        "ext sha src=%s dst=%s",
-                        _hash(src_ext),
-                        _hash(ext_path),
-                    )
-            except Exception as exc:
-                logger.info("WINDOW_WATCHER extension hash failed: %s", exc)
-
-            try:
-                cache_dir = os.path.join(
-                    os.path.expanduser("~"),
-                    ".cache",
-                    "gnome-shell",
-                    "extensions",
-                    uuid,
-                )
-                if os.path.isdir(cache_dir):
-                    shutil.rmtree(cache_dir, ignore_errors=True)
-                    self._log_debug("extension cache cleared: %s", cache_dir)
-            except Exception as exc:
-                logger.info("WINDOW_WATCHER extension cache clear failed: %s", exc)
         except Exception as exc:
             logger.info("WINDOW_WATCHER extension install failed: %s", exc)
             return
-
-        try:
-            version = subprocess.check_output(
-                ["gnome-extensions", "--version"],
-                stderr=subprocess.STDOUT,
-                text=True,
-            ).strip()
-            self._log_debug("gnome-extensions version: %s", version)
-            enabled = subprocess.check_output(
-                ["gnome-extensions", "list", "--enabled"],
-                stderr=subprocess.STDOUT,
-                text=True,
-            ).strip()
-            self._log_debug("extensions enabled: %s", enabled)
-            available = subprocess.check_output(
-                ["gnome-extensions", "list"],
-                stderr=subprocess.STDOUT,
-                text=True,
-            ).strip()
-            self._log_debug("extensions available: %s", available)
-        except subprocess.CalledProcessError as exc:
-            logger.info(
-                "WINDOW_WATCHER gnome-extensions probe failed: %s output=%s",
-                exc,
-                exc.output,
-            )
-        except FileNotFoundError:
-            logger.info("WINDOW_WATCHER gnome-extensions not found")
-        except Exception as exc:
-            logger.info("WINDOW_WATCHER gnome-extensions probe failed: %s", exc)
 
         try:
             subprocess.check_output(
@@ -924,488 +801,67 @@ class ActiveWindowWatcher:
                 text=True,
             )
             logger.info("WINDOW_WATCHER extension enabled")
-            enabled = subprocess.check_output(
-                ["gnome-extensions", "list", "--enabled"],
-                stderr=subprocess.STDOUT,
-                text=True,
-            ).strip()
-            self._log_debug("extensions enabled: %s", enabled)
-            info = subprocess.check_output(
-                ["gnome-extensions", "info", uuid],
-                stderr=subprocess.STDOUT,
-                text=True,
-            ).strip()
-            logger.info("WINDOW_WATCHER extension info: %s", info)
+        except FileNotFoundError:
+            logger.info("WINDOW_WATCHER gnome-extensions not found")
         except subprocess.CalledProcessError as exc:
             logger.info(
                 "WINDOW_WATCHER extension enable failed: %s output=%s",
                 exc,
                 exc.output,
             )
-            self._try_shell_reexec(uuid)
         except Exception as exc:
             logger.info("WINDOW_WATCHER extension enable failed: %s", exc)
-            self._try_shell_reexec(uuid)
-
-    def _try_shell_reexec(self, uuid: str) -> None:
-        try:
-            logger.info("WINDOW_WATCHER attempting GNOME Shell reexec")
-            subprocess.check_output(
-                [
-                    "gdbus",
-                    "call",
-                    "--session",
-                    "--dest",
-                    "org.gnome.Shell",
-                    "--object-path",
-                    "/org/gnome/Shell",
-                    "--method",
-                    "org.gnome.Shell.Eval",
-                    "global.reexec_self()",
-                ],
-                stderr=subprocess.STDOUT,
-                text=True,
-            )
-            logger.info("WINDOW_WATCHER GNOME Shell reexec requested")
-        except subprocess.CalledProcessError as exc:
-            logger.info(
-                "WINDOW_WATCHER GNOME Shell reexec failed: %s output=%s",
-                exc,
-                exc.output,
-            )
-            return
-        except Exception as exc:
-            logger.info("WINDOW_WATCHER GNOME Shell reexec failed: %s", exc)
-            return
-
-        try:
-            enabled = subprocess.check_output(
-                ["gnome-extensions", "list", "--enabled"],
-                stderr=subprocess.STDOUT,
-                text=True,
-            ).strip()
-            logger.info("WINDOW_WATCHER extensions enabled: %s", enabled)
-            info = subprocess.check_output(
-                ["gnome-extensions", "info", uuid],
-                stderr=subprocess.STDOUT,
-                text=True,
-            ).strip()
-            logger.info("WINDOW_WATCHER extension info: %s", info)
-        except Exception as exc:
-            logger.info("WINDOW_WATCHER extension post-reexec check failed: %s", exc)
 
     def _poll(self):
         self._ticks += 1
-        self._log_debug_kv("tick", {"ticks": self._ticks, "mode": self._mode})
-        # One-shot, global probe: run all methods and log everything.
-        self._probe_dbus_names()
-        self._probe_gnome_introspect()
-        self._probe_portal_window_tracker()
-        self._poll_wayland()
-        self._poll_wayland_gnome_eval()
-        self._poll_x11()
-        self._poll_x11_xdotool_fallback()
-        self._poll_x11_wmctrl_fallback()
-        self._probe_sway()
-        self._probe_kwin()
-        return True
-
-    def _probe_dbus_names(self):
-        self._log_debug("dbus list names attempt")
-        try:
-            result = subprocess.check_output(
-                [
-                    "gdbus",
-                    "call",
-                    "--session",
-                    "--dest",
-                    "org.freedesktop.DBus",
-                    "--object-path",
-                    "/org/freedesktop/DBus",
-                    "--method",
-                    "org.freedesktop.DBus.ListNames",
-                ],
-                stderr=subprocess.STDOUT,
-                text=True,
-            ).strip()
-            self._log_debug_kv("dbus list names output", {"output": result})
-            wanted = [
-                "org.inputremapper.ActiveWindow",
-                "org.gnome.Shell",
-                "org.freedesktop.portal.Desktop",
-                "org.kde.KWin",
-            ]
-            for name in wanted:
-                self._log_debug_kv(
-                    "dbus name present",
-                    {"name": name, "present": name in result},
-                )
-        except FileNotFoundError:
-            self._log_debug("dbus list names: gdbus not found")
-        except subprocess.CalledProcessError as exc:
-            self._log_debug_kv(
-                "dbus list names error",
-                {"error": exc, "output": exc.output},
-            )
-        except Exception as exc:
-            self._log_debug_kv("dbus list names error", {"error": exc})
-
-    def _probe_gnome_introspect(self):
-        self._log_debug("gnome introspect attempt")
-        try:
-            result = subprocess.check_output(
-                [
-                    "gdbus",
-                    "introspect",
-                    "--session",
-                    "--dest",
-                    "org.gnome.Shell.Introspect",
-                    "--object-path",
-                    "/org/gnome/Shell/Introspect",
-                ],
-                stderr=subprocess.STDOUT,
-                text=True,
-            ).strip()
-            self._log_debug_kv("gnome introspect", {"output": result})
-        except subprocess.CalledProcessError as exc:
-            self._log_debug_kv(
-                "gnome introspect error",
-                {"error": exc, "output": exc.output},
-            )
-            return
-        except FileNotFoundError:
-            self._log_debug("gnome introspect: gdbus not found")
-            return
-        except Exception as exc:
-            self._log_debug_kv("gnome introspect error", {"error": exc})
-            return
-
-        # Try common methods; log output/errors for each.
-        methods = [
-            "GetWindows",
-            "GetRunningApplications",
-            "GetWindow",
-            "GetActiveWindow",
-        ]
-        for method in methods:
-            try:
-                output = subprocess.check_output(
-                    [
-                        "gdbus",
-                        "call",
-                        "--session",
-                        "--dest",
-                        "org.gnome.Shell.Introspect",
-                        "--object-path",
-                        "/org/gnome/Shell/Introspect",
-                        "--method",
-                        f"org.gnome.Shell.Introspect.{method}",
-                    ],
-                    stderr=subprocess.STDOUT,
-                    text=True,
-                ).strip()
-                self._log_debug_kv(
-                    "gnome introspect call",
-                    {"method": method, "output": output},
-                )
-            except subprocess.CalledProcessError as exc:
-                self._log_debug_kv(
-                    "gnome introspect call error",
-                    {"method": method, "error": exc, "output": exc.output},
-                )
-            except Exception as exc:
-                self._log_debug_kv(
-                    "gnome introspect call error",
-                    {"method": method, "error": exc},
-                )
-
-    def _probe_portal_window_tracker(self):
-        self._log_debug("portal window tracker attempt")
-        try:
-            result = subprocess.check_output(
-                [
-                    "gdbus",
-                    "introspect",
-                    "--session",
-                    "--dest",
-                    "org.freedesktop.portal.Desktop",
-                    "--object-path",
-                    "/org/freedesktop/portal/desktop",
-                ],
-                stderr=subprocess.STDOUT,
-                text=True,
-            ).strip()
-            self._log_debug_kv("portal introspect", {"output": result})
-        except subprocess.CalledProcessError as exc:
-            self._log_debug_kv(
-                "portal introspect error",
-                {"error": exc, "output": exc.output},
-            )
-            return
-        except FileNotFoundError:
-            self._log_debug("portal introspect: gdbus not found")
-            return
-        except Exception as exc:
-            self._log_debug_kv("portal introspect error", {"error": exc})
-            return
-
-        methods = [
-            "GetActiveWindow",
-            "GetFocusedWindow",
-            "GetFocus",
-            "GetWindows",
-        ]
-        for method in methods:
-            try:
-                output = subprocess.check_output(
-                    [
-                        "gdbus",
-                        "call",
-                        "--session",
-                        "--dest",
-                        "org.freedesktop.portal.Desktop",
-                        "--object-path",
-                        "/org/freedesktop/portal/desktop",
-                        "--method",
-                        f"org.freedesktop.portal.WindowTracker.{method}",
-                    ],
-                    stderr=subprocess.STDOUT,
-                    text=True,
-                ).strip()
-                self._log_debug_kv(
-                    "portal window tracker call",
-                    {"method": method, "output": output},
-                )
-            except subprocess.CalledProcessError as exc:
-                self._log_debug_kv(
-                    "portal window tracker call error",
-                    {"method": method, "error": exc, "output": exc.output},
-                )
-            except Exception as exc:
-                self._log_debug_kv(
-                    "portal window tracker call error",
-                    {"method": method, "error": exc},
-                )
-
-    def _probe_sway(self):
-        self._log_debug("sway get_tree attempt")
-        try:
-            result = subprocess.check_output(
-                ["swaymsg", "-t", "get_tree"],
-                stderr=subprocess.STDOUT,
-                text=True,
-            )
-            self._log_debug_kv(
-                "sway get_tree output",
-                {"len": len(result), "head": result[:500]},
-            )
-        except FileNotFoundError:
-            self._log_debug("sway get_tree: swaymsg not found")
-        except subprocess.CalledProcessError as exc:
-            self._log_debug_kv(
-                "sway get_tree error",
-                {"error": exc, "output": exc.output},
-            )
-        except Exception as exc:
-            self._log_debug_kv("sway get_tree error", {"error": exc})
-
-    def _probe_kwin(self):
-        self._log_debug("kwin activeWindow attempt")
-        try:
-            result = subprocess.check_output(
-                ["qdbus", "org.kde.KWin", "/KWin", "org.kde.KWin.activeWindow"],
-                stderr=subprocess.STDOUT,
-                text=True,
-            ).strip()
-            self._log_debug_kv("kwin activeWindow output", {"output": result})
-        except FileNotFoundError:
-            self._log_debug("kwin activeWindow: qdbus not found")
-        except subprocess.CalledProcessError as exc:
-            self._log_debug_kv(
-                "kwin activeWindow error",
-                {"error": exc, "output": exc.output},
-            )
-        except Exception as exc:
-            self._log_debug_kv("kwin activeWindow error", {"error": exc})
-
-    def _poll_x11(self):
-        self._log_debug("x11 gdk attempt")
-        display = Gdk.Display.get_default()
-        screen = Gdk.Screen.get_default()
-        if not display or not screen:
-            self._log_debug_kv(
-                "x11 gdk no display/screen",
-                {"display": display, "screen": screen},
-            )
-            return True
-
-        window = screen.get_active_window()
-        if window is None:
-            self._log_debug("x11 gdk no active window")
-            return True
-
-        title = window.get_title() or ""
-        wm_class = window.get_wm_class() or ("", "")
-        xid = None
-        if hasattr(window, "get_xid"):
-            try:
-                xid = window.get_xid()
-            except Exception:
-                xid = None
-
-        current = (title, wm_class, xid)
-        self._log_debug_kv(
-            "x11 gdk values",
-            {
-                "title": title,
-                "wm_class": wm_class,
-                "xid": xid,
-                "current": current,
-                "last": self._last,
-            },
-        )
-        if current != self._last:
-            self._last = current
-            logger.info(
-                "WINDOW_WATCHER change title=%s wm_class=%s xid=%s",
-                title,
-                wm_class,
-                xid,
-            )
-        elif self._ticks % 10 == 0:
-            logger.info(
-                "WINDOW_WATCHER heartbeat title=%s wm_class=%s xid=%s",
-                title,
-                wm_class,
-                xid,
-            )
-
-        return True
-
-    def _poll_x11_xdotool_fallback(self):
-        self._log_debug("x11 xdotool attempt")
-        try:
-            xid = subprocess.check_output(
-                ["xdotool", "getactivewindow"],
-                stderr=subprocess.STDOUT,
-                text=True,
-            ).strip()
-            if not xid:
-                self._log_debug("x11 xdotool no xid")
-                return True
-
-            title = subprocess.check_output(
-                ["xdotool", "getwindowname", xid],
-                stderr=subprocess.STDOUT,
-                text=True,
-            ).strip()
-            try:
-                wm_class = subprocess.check_output(
-                    ["xdotool", "getwindowclassname", xid],
-                    stderr=subprocess.STDOUT,
-                    text=True,
-                ).strip()
-            except subprocess.CalledProcessError:
-                wm_class = ""
-
-            current = (title, wm_class, xid)
-            self._log_debug_kv(
-                "x11 xdotool values",
-                {
-                    "title": title,
-                    "wm_class": wm_class,
-                    "xid": xid,
-                    "current": current,
-                    "last": self._last,
-                },
-            )
-            if current != self._last:
-                self._last = current
-                logger.info(
-                    "WINDOW_WATCHER change title=%s wm_class=%s xid=%s (xdotool)",
-                    title,
-                    wm_class,
-                    xid,
-                )
-            elif self._ticks % 10 == 0:
-                logger.info(
-                    "WINDOW_WATCHER heartbeat title=%s wm_class=%s xid=%s (xdotool)",
-                    title,
-                    wm_class,
-                    xid,
-                )
-        except FileNotFoundError:
-            self._log_debug("x11 xdotool not found")
-        except subprocess.CalledProcessError as exc:
-            self._log_debug_kv(
-                "x11 xdotool error",
-                {"error": exc, "output": exc.output},
-            )
-        except Exception as exc:
-            self._log_debug_kv("x11 xdotool error", {"error": exc})
-
-        return True
-
-    def _poll_x11_wmctrl_fallback(self):
-        self._log_debug("x11 wmctrl attempt")
-        try:
-            active = subprocess.check_output(
-                ["wmctrl", "-lpG"],
-                stderr=subprocess.STDOUT,
-                text=True,
-            )
-            self._log_debug_kv("x11 wmctrl raw", {"output": active.strip()})
-        except FileNotFoundError:
-            self._log_debug("x11 wmctrl not found")
-        except subprocess.CalledProcessError as exc:
-            self._log_debug_kv(
-                "x11 wmctrl error",
-                {"error": exc, "output": exc.output},
-            )
-        except Exception as exc:
-            self._log_debug_kv("x11 wmctrl error", {"error": exc})
-        return True
-
-    def _poll_wayland_gnome_eval(self):
         if self._mode != "wayland":
             return True
-        self._log_debug("wayland gnome-shell eval attempt")
-        try:
-            result = subprocess.check_output(
-                [
-                    "gdbus",
-                    "call",
-                    "--session",
-                    "--dest",
-                    "org.gnome.Shell",
-                    "--object-path",
-                    "/org/gnome/Shell",
-                    "--method",
-                    "org.gnome.Shell.Eval",
-                    "JSON.stringify({"
-                    "title:(global.display.get_focus_window()&&global.display.get_focus_window().get_title&&global.display.get_focus_window().get_title())||'',"
-                    "wm_class:(global.display.get_focus_window()&&global.display.get_focus_window().get_wm_class&&global.display.get_focus_window().get_wm_class())||'',"
-                    "app_id:(global.display.get_focus_window()&&global.display.get_focus_window().get_gtk_application_id&&global.display.get_focus_window().get_gtk_application_id())||'',"
-                    "pid:(global.display.get_focus_window()&&global.display.get_focus_window().get_pid&&global.display.get_focus_window().get_pid())||0"
-                    "})",
-                ],
-                stderr=subprocess.STDOUT,
-                text=True,
-            ).strip()
-            self._log_debug_kv("wayland gnome-shell eval output", {"output": result})
-        except FileNotFoundError:
-            self._log_debug("wayland gdbus not found")
-        except subprocess.CalledProcessError as exc:
-            self._log_debug_kv(
-                "wayland gnome-shell eval error",
-                {"error": exc, "output": exc.output},
-            )
-        except Exception as exc:
-            self._log_debug_kv("wayland gnome-shell eval error", {"error": exc})
+
+        available, data, error = self._fetch_wayland()
+        if not available or data is None:
+            atspi_available, atspi_data, atspi_error = self._fetch_atspi()
+            if atspi_available and atspi_data:
+                available, data, error = True, atspi_data, None
+            elif not available:
+                available, data, error = atspi_available, atspi_data, atspi_error or error
+
+        if not available:
+            self._emit_state(False, None, error)
+            return True
+
+        self._emit_state(True, data, None)
         return True
 
-    def _poll_wayland(self):
-        self._log_debug("wayland extension gdbus attempt")
+    def _emit_state(self, available: bool, data: Optional[dict], error: Optional[str]):
+        title = data.get("title", "") if data else ""
+        wm_class = data.get("wm_class", "") if data else ""
+        app_id = data.get("app_id", "") if data else ""
+        pid = data.get("pid", 0) if data else 0
+
+        state = (available, title, wm_class, app_id, pid, error)
+        if state == self._last_state:
+            return
+        self._last_state = state
+
+        if not available:
+            if error != self._last_error:
+                self._last_error = error
+                logger.info("WINDOW_WATCHER unavailable error=%s", error)
+        elif not data:
+            logger.info("WINDOW_WATCHER inactive (no focused window)")
+        else:
+            logger.info(
+                "WINDOW_WATCHER active app_id=%s wm_class=%s pid=%s title=%s",
+                app_id,
+                wm_class,
+                pid,
+                title,
+            )
+
+        if self._on_change:
+            self._on_change({"available": available, "data": data})
+
+    def _fetch_wayland(self):
         try:
             result = subprocess.check_output(
                 [
@@ -1422,72 +878,105 @@ class ActiveWindowWatcher:
                 stderr=subprocess.STDOUT,
                 text=True,
             ).strip()
+        except FileNotFoundError:
+            return False, None, "gdbus not found"
         except subprocess.CalledProcessError as exc:
-            self._log_debug_kv(
-                "wayland gdbus error",
-                {"error": exc, "output": exc.output},
-            )
-            return True
+            return False, None, (exc.output or str(exc)).strip()
         except Exception as exc:
-            self._log_debug_kv("wayland gdbus error", {"error": exc})
-            return True
+            return False, None, str(exc)
 
         match = re.match(r"^\('(.*)'\)$", result)
         if not match:
-            self._log_debug_kv("wayland gdbus output", {"output": result})
-            return True
+            return False, None, f"unexpected reply: {result}"
 
         payload_str = match.group(1).encode("utf-8").decode("unicode_escape")
         if not payload_str or payload_str == "{}":
-            self._log_debug_kv(
-                "wayland no active window",
-                {"payload": payload_str},
-            )
-            return True
+            return True, None, None
 
         try:
             data = json.loads(payload_str)
         except Exception:
-            self._log_debug_kv("wayland bad json", {"payload": payload_str})
-            return True
+            return False, None, f"bad json: {payload_str}"
 
-        title = data.get("title", "")
-        wm_class = data.get("wm_class", "")
-        app_id = data.get("app_id", "")
-        pid = data.get("pid", 0)
-
-        current = (title, wm_class, app_id, pid)
-        self._log_debug_kv(
-            "wayland gdbus values",
+        return (
+            True,
             {
-                "title": title,
-                "wm_class": wm_class,
-                "app_id": app_id,
-                "pid": pid,
-                "current": current,
-                "last": self._last,
-                "raw": payload_str,
+                "title": data.get("title", ""),
+                "wm_class": data.get("wm_class", ""),
+                "app_id": data.get("app_id", ""),
+                "pid": data.get("pid", 0),
             },
+            None,
         )
-        if current != self._last:
-            self._last = current
-            logger.info(
-                "WINDOW_WATCHER change title=%s wm_class=%s app_id=%s pid=%s",
-                title,
-                wm_class,
-                app_id,
-                pid,
-            )
-        elif self._ticks % 10 == 0:
-            logger.info(
-                "WINDOW_WATCHER heartbeat title=%s wm_class=%s app_id=%s pid=%s",
-                title,
-                wm_class,
-                app_id,
-                pid,
-            )
 
-        return True
+    def _fetch_atspi(self):
+        try:
+            import pyatspi
+        except Exception as exc:
+            return False, None, f"pyatspi not available: {exc}"
+
+        try:
+            desktop = pyatspi.Registry.getDesktop(0)
+            active_app = None
+            applications = []
+            try:
+                count = getattr(desktop, "childCount", 0)
+                for index in range(count):
+                    applications.append(desktop.getChildAtIndex(index))
+            except Exception:
+                try:
+                    applications = list(desktop)
+                except Exception:
+                    applications = []
+
+            for application in applications:
+                try:
+                    state = application.getState()
+                    if state.contains(pyatspi.STATE_ACTIVE) or state.contains(
+                        pyatspi.STATE_FOCUSED
+                    ):
+                        active_app = application
+                        break
+                except Exception:
+                    continue
+
+            if not active_app:
+                return True, None, None
+
+            title = ""
+            try:
+                for child in active_app:
+                    child_name = getattr(child, "name", "")
+                    if child_name:
+                        title = child_name
+                        break
+            except Exception:
+                title = ""
+
+            pid = 0
+            try:
+                pid = active_app.get_process_id()
+            except Exception:
+                pid = 0
+
+            app_name = ""
+            try:
+                app_name = active_app.name or ""
+            except Exception:
+                app_name = ""
+
+            return (
+                True,
+                {
+                    "title": title,
+                    "wm_class": app_name,
+                    "app_id": app_name,
+                    "pid": pid,
+                },
+                None,
+            )
+        except Exception as exc:
+            return False, None, str(exc)
 
 
 class SteamProcessWatcher:
@@ -1496,6 +985,7 @@ class SteamProcessWatcher:
     def __init__(self, on_change: Optional[Callable[[List[str]], None]] = None):
         self._ticks = 0
         self._last = None
+        self._last_hits: List[dict] = []
         self._on_change = on_change
         self._games = get_steam_installed_game_paths()
         self._paths = []
@@ -1531,6 +1021,7 @@ class SteamProcessWatcher:
             if info.get("matches"):
                 hits.append(info)
         current_appids = sorted({match["appid"] for match in hits if match.get("appid")})
+        self._last_hits = hits
         if current_appids != self._last:
             self._last = current_appids
             logger.info(
@@ -1544,6 +1035,9 @@ class SteamProcessWatcher:
                 except Exception as exc:
                     self._log_debug_kv("callback error", {"error": exc})
         return True
+
+    def get_hits(self) -> List[dict]:
+        return self._last_hits
 
     def _summarize_hits(self, hits: List[dict], appids: List[str]) -> List[dict]:
         summaries = []
@@ -1716,7 +1210,10 @@ class GameAutoSwitcher:
         self._data_manager = data_manager
         self._last_appids: List[str] = []
         self._last_applied: Dict[str, Optional[str]] = {}
+        self._window_available = False
+        self._window_info: Optional[dict] = None
         self._watcher = SteamProcessWatcher(self._on_appids)
+        self._window_watcher = ActiveWindowWatcher(self._on_window_change)
         GLib.timeout_add(2000, self._periodic_apply)
 
     def _log(self, message: str, *args):
@@ -1726,12 +1223,54 @@ class GameAutoSwitcher:
         if appids == self._last_appids:
             return
         self._last_appids = list(appids)
-        self._apply_for_groups(appids)
+        self._apply_focus_or_fallback()
 
     def _periodic_apply(self):
-        if self._last_appids:
-            self._apply_for_groups(self._last_appids)
+        if self._last_appids or self._window_available:
+            self._apply_focus_or_fallback()
         return True
+
+    def _on_window_change(self, payload: dict):
+        self._window_available = bool(payload.get("available"))
+        self._window_info = payload.get("data")
+        self._apply_focus_or_fallback()
+
+    def _apply_focus_or_fallback(self):
+        focused_appid = self._resolve_focused_appid()
+        if self._window_available:
+            appids = [focused_appid] if focused_appid else []
+        else:
+            appids = self._last_appids
+        self._apply_for_groups(appids)
+
+    def _resolve_focused_appid(self) -> Optional[str]:
+        if not self._window_info:
+            return None
+        appid = self._appid_from_window(self._window_info)
+        if appid:
+            return appid
+        pid = self._window_info.get("pid")
+        if pid:
+            for hit in self._watcher.get_hits():
+                if hit.get("pid") == pid and hit.get("appid"):
+                    return hit["appid"]
+        return None
+
+    def _appid_from_window(self, info: dict) -> Optional[str]:
+        fields = [
+            info.get("app_id", ""),
+            info.get("wm_class", ""),
+            info.get("title", ""),
+        ]
+        for field in fields:
+            if not field:
+                continue
+            if field.isdigit():
+                return field
+            match = re.search(r"steam_app[_-]?(\d+)", field, re.IGNORECASE)
+            if match:
+                return match.group(1)
+        return None
 
     def _apply_for_groups(self, appids: List[str]):
         try:
