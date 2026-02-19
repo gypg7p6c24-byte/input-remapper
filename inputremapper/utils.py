@@ -154,8 +154,22 @@ def _parse_appmanifest_details(path: str) -> Optional[Tuple[str, str, str]]:
     return appid, name, installdir
 
 
-def _is_steam_runtime(name: str, installdir: Optional[str] = None) -> bool:
+def _is_steam_runtime(
+    name: str, installdir: Optional[str] = None, appid: Optional[str] = None
+) -> bool:
     """Return True for Steam runtimes/tools that shouldn't appear in the game list."""
+    known_runtime_appids = {
+        "1070560",  # Steam Linux Runtime 1.0 (scout)
+        "1391110",  # Steam Linux Runtime 2.0 (soldier)
+        "1628350",  # Steam Linux Runtime 3.0 (sniper)
+        "228980",  # Steamworks Common Redistributables
+        "1161040",  # Proton BattlEye Runtime
+        "1493710",  # Proton Experimental
+        "2180100",  # Proton Hotfix
+        "3658110",  # Proton 10.0
+    }
+    if appid and appid in known_runtime_appids:
+        return True
     haystack = f"{name} {installdir or ''}".lower()
     if "proton" in haystack:
         return True
@@ -192,7 +206,7 @@ def get_steam_installed_games() -> List[Tuple[str, str]]:
 
             appid, name = parsed
             appid = appid or appid_from_name
-            if appid and not _is_steam_runtime(name):
+            if appid and not _is_steam_runtime(name, appid=appid):
                 games[appid] = name
 
     return sorted(games.items(), key=lambda item: item[1].lower())
@@ -224,7 +238,7 @@ def get_steam_installed_game_paths() -> List[Tuple[str, str, str]]:
             appid = appid or appid_from_name
             if not appid or not installdir:
                 continue
-            if _is_steam_runtime(name, installdir):
+            if _is_steam_runtime(name, installdir, appid=appid):
                 continue
 
             install_path = os.path.join(library, "common", installdir)
