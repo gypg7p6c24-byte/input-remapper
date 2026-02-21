@@ -68,7 +68,13 @@ from inputremapper.gui.messages.message_data import (
     UserConfirmRequest,
     DoStackSwitch,
 )
-from inputremapper.gui.utils import CTX_APPLY, CTX_ERROR, CTX_WARNING, CTX_MAPPING
+from inputremapper.gui.utils import (
+    CTX_APPLY,
+    CTX_ERROR,
+    CTX_WARNING,
+    CTX_MAPPING,
+    debounce,
+)
 from inputremapper.injection.injector import (
     InjectorState,
     InjectorStateMessage,
@@ -616,8 +622,31 @@ class Controller:
         """Save all data to the disc."""
         try:
             self.data_manager.save()
+            self._reinject_if_running()
         except PermissionError as e:
             self.show_status(CTX_ERROR, _("Permission denied!"), str(e))
+
+    @debounce(300)
+    def _reinject_if_running(self):
+        """Refresh injection to apply live changes when already running."""
+        try:
+            state = self.data_manager.get_state()
+        except DataManagementError:
+            return False
+
+        if state not in (
+            InjectorState.RUNNING,
+            InjectorState.STARTING,
+            InjectorState.NO_GRAB,
+        ):
+            return False
+
+        try:
+            if not self.data_manager.start_injecting():
+                self.show_status(CTX_ERROR, _("Failed to refresh injection"))
+        except DataManagementError:
+            return False
+        return False
 
     def start_key_recording(self):
         """Record the input of the active_group

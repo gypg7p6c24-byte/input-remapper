@@ -961,7 +961,7 @@ class SteamProcessWatcher:
         if cmd_appid:
             matches.append(("cmdline", cmd_appid))
 
-        shortcut_appid = self._match_shortcut_appid(exe, cwd, cmd_text)
+        shortcut_appid = self._match_shortcut_appid(exe, cwd, cmd_text, env)
         if shortcut_appid:
             matches.append(("shortcut", shortcut_appid))
 
@@ -1087,18 +1087,36 @@ class SteamProcessWatcher:
                 return appid
         return ""
 
-    def _match_shortcut_appid(self, exe: str, cwd: str, cmd_text: str) -> str:
+    def _match_shortcut_appid(
+        self, exe: str, cwd: str, cmd_text: str, env: dict
+    ) -> str:
         if not self._shortcut_tokens:
             return ""
-        haystack = " ".join([exe or "", cwd or "", cmd_text or ""]).lower()
+        flatpak_id = env.get("FLATPAK_ID", "") if env else ""
+        haystack = " ".join([exe or "", cwd or "", cmd_text or "", flatpak_id]).lower()
+        if not haystack.strip():
+            return ""
         for appid, tokens in self._shortcut_tokens.items():
             if self._shortcut_requires_flatpak.get(appid):
-                if "flatpak" not in haystack and "bwrap" not in haystack:
+                if not self._flatpak_active(haystack, env):
                     continue
             for token in tokens:
                 if token and token in haystack:
                     return appid
         return ""
+
+    def _flatpak_active(self, haystack: str, env: dict) -> bool:
+        if "flatpak" in haystack or "bwrap" in haystack:
+            return True
+        if not env:
+            return False
+        if env.get("FLATPAK_ID"):
+            return True
+        if env.get("container") == "flatpak":
+            return True
+        if env.get("FLATPAK_SANDBOX_DIR"):
+            return True
+        return False
 
 
 class GameAutoSwitcher:
