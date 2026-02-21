@@ -441,12 +441,24 @@ def get_steam_installed_game_paths() -> List[Tuple[str, str, str]]:
     for appid, (name, install_path) in games.items():
         result.append((appid, name, install_path))
 
-    skip_paths = {"/usr/bin", "/usr/bin/flatpak", "/usr/bin/env"}
+    skip_paths = {
+        "/",
+        "/bin",
+        "/snap/bin",
+        "/usr",
+        "/usr/bin",
+        "/usr/bin/flatpak",
+        "/usr/bin/env",
+        "/usr/local/bin",
+    }
     for appid, name, exe, startdir, _launch in get_steam_shortcuts():
         base_path = startdir or exe
         if not base_path:
             continue
+        base_path = os.path.normpath(base_path)
         if base_path in skip_paths:
+            continue
+        if base_path.startswith("/usr/bin/"):
             continue
         result.append((appid, name, base_path))
 
