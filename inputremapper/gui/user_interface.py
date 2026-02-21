@@ -22,6 +22,13 @@
 import os
 from typing import Dict, Callable
 
+import gi
+
+try:
+    gi.require_version("AppIndicator3", "0.1")
+except Exception:
+    pass
+
 from gi.repository import Gtk, GtkSource, Gdk, GObject
 
 try:
@@ -164,11 +171,15 @@ class TrayIcon:
         desired = item.get_active()
         if not self._ui.set_autostart_enabled(desired):
             self._sync_autostart_state()
+            return
+        self._sync_autostart_state()
 
     def _on_autohide_toggled(self, item):
         desired = item.get_active()
         if not self._ui.set_autostart_hidden(desired):
             self._sync_autostart_state()
+            return
+        self._sync_autostart_state()
 
 
 class UserInterface:
