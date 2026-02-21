@@ -4,4 +4,5 @@ Name=input-remapper-gtk
 Exec=input-remapper-gtk
 Icon=input-remapper
 Comment=Start input-remapper GUI in the background
-X-GNOME-Autostart-enabled=true
+Hidden=true
+X-GNOME-Autostart-enabled=false

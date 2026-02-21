@@ -24,6 +24,14 @@ from typing import Dict, Callable
 
 from gi.repository import Gtk, GtkSource, Gdk, GObject
 
+try:
+    from gi.repository import AppIndicator3
+
+    APPINDICATOR_AVAILABLE = True
+except Exception:
+    AppIndicator3 = None
+    APPINDICATOR_AVAILABLE = False
+
 from inputremapper.configs.data import get_data_path
 from inputremapper.configs.input_config import InputCombination
 from inputremapper.configs.mapping import MappingData
@@ -88,11 +96,8 @@ class TrayIcon:
 
     def __init__(self, ui: "UserInterface"):
         self._ui = ui
-        self._icon = Gtk.StatusIcon()
-        self._icon.set_from_icon_name("input-remapper")
-        self._icon.set_tooltip_text("input-remapper")
-        self._icon.connect("activate", self._on_activate)
-        self._icon.connect("popup-menu", self._on_popup_menu)
+        self._icon = None
+        self._indicator = None
 
         self._menu = Gtk.Menu()
         self._item_show = Gtk.MenuItem(label=_("Show"))
@@ -108,6 +113,24 @@ class TrayIcon:
         self._menu.append(self._item_autohide)
         self._menu.append(self._item_quit)
         self._menu.show_all()
+        if APPINDICATOR_AVAILABLE:
+            self._indicator = AppIndicator3.Indicator.new(
+                "input-remapper",
+                "input-remapper",
+                AppIndicator3.IndicatorCategory.APPLICATION_STATUS,
+            )
+            self._indicator.set_status(AppIndicator3.IndicatorStatus.ACTIVE)
+            self._indicator.set_icon_full("input-remapper", "input-remapper")
+            self._indicator.set_menu(self._menu)
+            logger.info("Tray backend: AppIndicator")
+        else:
+            self._icon = Gtk.StatusIcon()
+            self._icon.set_from_icon_name("input-remapper")
+            self._icon.set_tooltip_text("input-remapper")
+            self._icon.connect("activate", self._on_activate)
+            self._icon.connect("popup-menu", self._on_popup_menu)
+            logger.info("Tray backend: StatusIcon")
+
         self._sync_autostart_state()
 
     def _on_activate(self, *_):
@@ -195,6 +218,8 @@ class UserInterface:
         self._tray_icon = TrayIcon(self)
         if os.environ.get("INPUT_REMAPPER_START_HIDDEN") == "1":
             self.close()
+        else:
+            self.window.present()
 
     def _build_ui(self):
         """Build the window from stylesheet and gladefile."""
@@ -524,7 +549,10 @@ class UserInterface:
         user_path = self._autostart_user_path()
         if os.path.isfile(user_path):
             return not self._autostart_file_disabled(user_path)
-        return os.path.isfile(self._autostart_system_path())
+        system_path = self._autostart_system_path()
+        if os.path.isfile(system_path):
+            return not self._autostart_file_disabled(system_path)
+        return False
 
     def get_autostart_hidden(self) -> bool:
         user_path = self._autostart_user_path()
