@@ -798,7 +798,13 @@ class SteamProcessWatcher:
             info = self._inspect_pid(pid)
             if info.get("matches"):
                 hits.append(info)
-        current_appids = sorted({match["appid"] for match in hits if match.get("appid")})
+        current_appids = sorted(
+            {
+                match["appid"]
+                for match in hits
+                if match.get("appid") and match.get("appid") != "0"
+            }
+        )
         self._last_hits = hits
         if current_appids != self._last:
             self._last = current_appids
@@ -1001,12 +1007,18 @@ class SteamProcessWatcher:
         for key in keys:
             value = env.get(key)
             if value and value.isdigit():
+                try:
+                    numeric = int(value)
+                except Exception:
+                    return value
+                if numeric == 0:
+                    return ""
                 if len(value) > 10:
                     try:
                         return str(int(value) & 0xFFFFFFFF)
                     except Exception:
                         return value
-                return value
+                return str(numeric)
         return ""
 
     def _get_compat_appid(self, env: dict) -> str:
@@ -1039,6 +1051,8 @@ class SteamProcessWatcher:
             match = re.search(pattern, text, re.IGNORECASE)
             if match:
                 value = match.group(1)
+                if value.isdigit() and int(value) == 0:
+                    return ""
                 if len(value) > 10:
                     try:
                         return str(int(value) & 0xFFFFFFFF)
