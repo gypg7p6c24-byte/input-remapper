@@ -1096,10 +1096,21 @@ class SteamProcessWatcher:
         haystack = " ".join([exe or "", cwd or "", cmd_text or "", flatpak_id]).lower()
         if not haystack.strip():
             return ""
+        exe_base = os.path.basename(exe or "").lower()
         for appid, tokens in self._shortcut_tokens.items():
             if self._shortcut_requires_flatpak.get(appid):
-                if not self._flatpak_active(haystack, env):
+                # Prefer matching the actual app process (with FLATPAK_ID), not wrapper.
+                if exe_base in ("bwrap", "flatpak"):
                     continue
+                if flatpak_id:
+                    if flatpak_id.lower() not in tokens:
+                        continue
+                else:
+                    if not self._flatpak_active(haystack, env):
+                        continue
+            elif exe_base in ("bwrap", "flatpak"):
+                # Avoid matching wrappers for non-flatpak shortcuts.
+                continue
             for token in tokens:
                 if token and token in haystack:
                     return appid
