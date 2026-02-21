@@ -757,6 +757,7 @@ class SteamProcessWatcher:
         self._paths = []
         self._name_by_appid = {}
         self._shortcut_tokens: Dict[str, Set[str]] = {}
+        self._shortcut_requires_flatpak: Dict[str, bool] = {}
         for appid, name, path in self._games:
             self._paths.append((os.path.normpath(path), appid, name))
             self._name_by_appid[appid] = name
@@ -765,6 +766,9 @@ class SteamProcessWatcher:
             tokens = self._build_shortcut_tokens(exe, startdir, launch_options)
             if tokens:
                 self._shortcut_tokens[appid] = tokens
+                self._shortcut_requires_flatpak[appid] = self._shortcut_is_flatpak(
+                    exe, startdir, launch_options
+                )
         if self._shortcuts:
             logger.info("GAME_WATCHER shortcuts loaded=%s", len(self._shortcuts))
         # Longest paths first to reduce false positives.
@@ -888,6 +892,12 @@ class SteamProcessWatcher:
         if flatpak_appid:
             tokens.add(flatpak_appid)
         return tokens
+
+    def _shortcut_is_flatpak(
+        self, exe: str, startdir: str, launch_options: str
+    ) -> bool:
+        haystack = " ".join([exe or "", startdir or "", launch_options or ""]).lower()
+        return "flatpak" in haystack
 
     def _extract_flatpak_appid(self, args: List[str]) -> str:
         if not args:
@@ -1082,6 +1092,9 @@ class SteamProcessWatcher:
             return ""
         haystack = " ".join([exe or "", cwd or "", cmd_text or ""]).lower()
         for appid, tokens in self._shortcut_tokens.items():
+            if self._shortcut_requires_flatpak.get(appid):
+                if "flatpak" not in haystack and "bwrap" not in haystack:
+                    continue
             for token in tokens:
                 if token and token in haystack:
                     return appid

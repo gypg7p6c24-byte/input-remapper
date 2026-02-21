@@ -643,6 +643,8 @@ class Controller:
                             )
                     except DataManagementError:
                         pass
+                # Clear the "Pausing injection..." status once recording ends.
+                self.show_status(CTX_APPLY, None)
 
             self.gui.disconnect_shortcuts()
             self.message_broker.subscribe(
