@@ -96,6 +96,7 @@ class Controller:
         self.gui: Optional[UserInterface] = None
 
         self.button_left_warn = False
+        self._resume_injection_after_recording = False
         self._attach_to_events()
 
     def set_gui(self, gui: UserInterface):
@@ -623,29 +624,55 @@ class Controller:
 
         Updates the active_mapping.input_combination with the recorded events.
         """
-        state = self.data_manager.get_state()
-        if state == InjectorState.RUNNING or state == InjectorState.STARTING:
-            self.data_manager.stop_combination_recording()
-            self.message_broker.signal(MessageType.recording_finished)
-            self.show_status(CTX_ERROR, _('Use "Stop" to stop before editing'))
+        self._resume_injection_after_recording = False
+
+        def begin_recording():
+            logger.debug("Recording Keys")
+
+            def on_recording_finished(_):
+                self.message_broker.unsubscribe(on_recording_finished)
+                self.message_broker.unsubscribe(self._on_combination_recorded)
+                self.gui.connect_shortcuts()
+                if self._resume_injection_after_recording:
+                    self._resume_injection_after_recording = False
+                    try:
+                        if not self.data_manager.start_injecting():
+                            self.show_status(
+                                CTX_ERROR,
+                                _("Failed to resume injection"),
+                            )
+                    except DataManagementError:
+                        pass
+
+            self.gui.disconnect_shortcuts()
+            self.message_broker.subscribe(
+                MessageType.combination_recorded,
+                self._on_combination_recorded,
+            )
+            self.message_broker.subscribe(
+                MessageType.recording_finished, on_recording_finished
+            )
+            self.data_manager.start_combination_recording()
+
+        try:
+            state = self.data_manager.get_state()
+        except DataManagementError:
+            state = InjectorState.UNKNOWN
+
+        if state in (InjectorState.RUNNING, InjectorState.STARTING):
+            self._resume_injection_after_recording = True
+            self.show_status(CTX_APPLY, _("Pausing injection for recording..."))
+            try:
+                self.data_manager.stop_injecting()
+            except DataManagementError:
+                pass
+            self.data_manager.do_when_injector_state(
+                {InjectorState.STOPPED, InjectorState.NO_GRAB, InjectorState.ERROR},
+                begin_recording,
+            )
             return
 
-        logger.debug("Recording Keys")
-
-        def on_recording_finished(_):
-            self.message_broker.unsubscribe(on_recording_finished)
-            self.message_broker.unsubscribe(self._on_combination_recorded)
-            self.gui.connect_shortcuts()
-
-        self.gui.disconnect_shortcuts()
-        self.message_broker.subscribe(
-            MessageType.combination_recorded,
-            self._on_combination_recorded,
-        )
-        self.message_broker.subscribe(
-            MessageType.recording_finished, on_recording_finished
-        )
-        self.data_manager.start_combination_recording()
+        begin_recording()
 
     def stop_key_recording(self):
         """Stop recording the input."""

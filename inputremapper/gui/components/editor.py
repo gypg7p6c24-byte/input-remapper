@@ -24,6 +24,7 @@
 from __future__ import annotations
 
 from collections import defaultdict
+import shlex
 from typing import List, Optional, Dict, Union, Callable, Literal, Set, TYPE_CHECKING
 
 import cairo
@@ -66,6 +67,7 @@ from inputremapper.utils import (
     get_evdev_constant_name,
     get_steam_installed_games,
     get_steam_installed_game_paths,
+    get_steam_shortcuts,
 )
 
 if TYPE_CHECKING:
@@ -751,16 +753,29 @@ class SteamProcessWatcher:
         self._last_hits: List[dict] = []
         self._on_change = on_change
         self._games = get_steam_installed_game_paths()
+        self._shortcuts = get_steam_shortcuts()
         self._paths = []
         self._name_by_appid = {}
+        self._shortcut_tokens: Dict[str, Set[str]] = {}
         for appid, name, path in self._games:
             self._paths.append((os.path.normpath(path), appid, name))
             self._name_by_appid[appid] = name
+        for appid, name, exe, startdir, launch_options in self._shortcuts:
+            self._name_by_appid.setdefault(appid, name)
+            tokens = self._build_shortcut_tokens(exe, startdir, launch_options)
+            if tokens:
+                self._shortcut_tokens[appid] = tokens
+        if self._shortcuts:
+            logger.info("GAME_WATCHER shortcuts loaded=%s", len(self._shortcuts))
         # Longest paths first to reduce false positives.
         self._paths.sort(key=lambda item: len(item[0]), reverse=True)
         self._log_debug_kv(
             "init games",
             {"count": len(self._games), "games": self._games},
+        )
+        self._log_debug_kv(
+            "init shortcuts",
+            {"count": len(self._shortcuts), "shortcuts": self._shortcuts},
         )
         GLib.timeout_add(1000, self._poll)
 
@@ -823,6 +838,85 @@ class SteamProcessWatcher:
             )
         return summaries
 
+    def _build_shortcut_tokens(
+        self, exe: str, startdir: str, launch_options: str
+    ) -> Set[str]:
+        tokens: Set[str] = set()
+        for value in (exe, startdir):
+            token = self._normalize_shortcut_token(value)
+            if token and not self._is_generic_shortcut_token(token):
+                tokens.add(token)
+                tokens.add(os.path.basename(token))
+
+        for token in self._tokens_from_launch_options(launch_options):
+            if token and not self._is_generic_shortcut_token(token):
+                tokens.add(token)
+        return {token.lower() for token in tokens if token}
+
+    def _normalize_shortcut_token(self, value: str) -> str:
+        if not value:
+            return ""
+        value = value.strip()
+        if not value:
+            return ""
+        try:
+            parts = shlex.split(value)
+            if parts:
+                value = parts[0]
+        except ValueError:
+            value = value.split()[0]
+        value = value.strip().strip('"').strip("'")
+        value = os.path.expanduser(os.path.expandvars(value))
+        return value
+
+    def _tokens_from_launch_options(self, launch_options: str) -> Set[str]:
+        tokens: Set[str] = set()
+        if not launch_options:
+            return tokens
+        try:
+            parts = shlex.split(launch_options)
+        except ValueError:
+            parts = launch_options.split()
+        tokens.update(parts)
+        flatpak_appid = self._extract_flatpak_appid(parts)
+        if flatpak_appid:
+            tokens.add(flatpak_appid)
+        return tokens
+
+    def _extract_flatpak_appid(self, args: List[str]) -> str:
+        if not args:
+            return ""
+        for idx, token in enumerate(args):
+            if token != "run":
+                continue
+            for candidate in args[idx + 1 :]:
+                if candidate.startswith("-"):
+                    continue
+                return candidate
+        return ""
+
+    def _is_generic_shortcut_token(self, token: str) -> bool:
+        generic = {
+            "flatpak",
+            "run",
+            "%command%",
+            "/usr/bin",
+            "/usr/bin/flatpak",
+            "/usr/bin/env",
+            "bash",
+            "sh",
+        }
+        token = token.strip()
+        if not token:
+            return True
+        if token in generic:
+            return True
+        if token.startswith("-"):
+            return True
+        if token.isdigit():
+            return True
+        return False
+
     def _list_pids(self):
         try:
             for entry in os.listdir("/proc"):
@@ -850,6 +944,10 @@ class SteamProcessWatcher:
         cmd_appid = self._get_cmd_appid(cmdline)
         if cmd_appid:
             matches.append(("cmdline", cmd_appid))
+
+        shortcut_appid = self._match_shortcut_appid(exe, cwd, cmd_text)
+        if shortcut_appid:
+            matches.append(("shortcut", shortcut_appid))
 
         path_appid = self._match_path_appid(exe, cwd, cmd_text)
         if path_appid:
@@ -965,15 +1063,32 @@ class SteamProcessWatcher:
                 return appid
         return ""
 
+    def _match_shortcut_appid(self, exe: str, cwd: str, cmd_text: str) -> str:
+        if not self._shortcut_tokens:
+            return ""
+        haystack = " ".join([exe or "", cwd or "", cmd_text or ""]).lower()
+        for appid, tokens in self._shortcut_tokens.items():
+            for token in tokens:
+                if token and token in haystack:
+                    return appid
+        return ""
+
 
 class GameAutoSwitcher:
     """Apply presets based on detected game appids."""
 
-    def __init__(self, data_manager: "DataManager"):
+    def __init__(self, data_manager: "DataManager", message_broker: MessageBroker):
         self._data_manager = data_manager
         self._last_appids: List[str] = []
         self._last_applied: Dict[str, Optional[str]] = {}
+        self._paused = False
         self._watcher = SteamProcessWatcher(self._on_appids)
+        message_broker.subscribe(
+            MessageType.recording_started, self._on_recording_started
+        )
+        message_broker.subscribe(
+            MessageType.recording_finished, self._on_recording_finished
+        )
         GLib.timeout_add(2000, self._periodic_apply)
 
     def _log(self, message: str, *args):
@@ -983,11 +1098,22 @@ class GameAutoSwitcher:
         if appids == self._last_appids:
             return
         self._last_appids = list(appids)
+        if self._paused:
+            return
         self._apply_for_groups(self._last_appids)
 
     def _periodic_apply(self):
+        if self._paused:
+            return True
         self._apply_for_groups(self._last_appids)
         return True
+
+    def _on_recording_started(self, _):
+        self._paused = True
+
+    def _on_recording_finished(self, _):
+        self._paused = False
+        self._apply_for_groups(self._last_appids)
 
     def _apply_for_groups(self, appids: List[str]):
         try:

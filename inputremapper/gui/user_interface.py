@@ -19,6 +19,7 @@
 
 
 """User Interface."""
+import os
 from typing import Dict, Callable
 
 from gi.repository import Gtk, GtkSource, Gdk, GObject
@@ -78,6 +79,75 @@ def on_close_about(about, _):
     return True
 
 
+AUTOSTART_FILENAME = "input-remapper-gtk-autostart.desktop"
+AUTOSTART_HIDDEN_KEY = "X-Input-Remapper-AutoHidden"
+
+
+class TrayIcon:
+    """System tray icon with basic show/quit actions."""
+
+    def __init__(self, ui: "UserInterface"):
+        self._ui = ui
+        self._icon = Gtk.StatusIcon()
+        self._icon.set_from_icon_name("input-remapper")
+        self._icon.set_tooltip_text("input-remapper")
+        self._icon.connect("activate", self._on_activate)
+        self._icon.connect("popup-menu", self._on_popup_menu)
+
+        self._menu = Gtk.Menu()
+        self._item_show = Gtk.MenuItem(label=_("Show"))
+        self._item_autostart = Gtk.CheckMenuItem(label=_("Autostart"))
+        self._item_autohide = Gtk.CheckMenuItem(label=_("Auto Hidden"))
+        self._item_quit = Gtk.MenuItem(label=_("Quit"))
+        self._item_show.connect("activate", self._on_show)
+        self._item_autostart.connect("toggled", self._on_autostart_toggled)
+        self._item_autohide.connect("toggled", self._on_autohide_toggled)
+        self._item_quit.connect("activate", self._on_quit)
+        self._menu.append(self._item_show)
+        self._menu.append(self._item_autostart)
+        self._menu.append(self._item_autohide)
+        self._menu.append(self._item_quit)
+        self._menu.show_all()
+        self._sync_autostart_state()
+
+    def _on_activate(self, *_):
+        if self._ui.window.get_visible():
+            self._ui.close()
+        else:
+            self._ui.show_window()
+
+    def _on_popup_menu(self, _icon, button, time):
+        self._menu.popup(None, None, None, None, button, time)
+
+    def _on_show(self, *_):
+        self._ui.show_window()
+
+    def _on_quit(self, *_):
+        self._ui.controller.close()
+
+    def _sync_autostart_state(self):
+        autostart_enabled = self._ui.get_autostart_enabled()
+        autohide_enabled = self._ui.get_autostart_hidden()
+        self._item_autostart.handler_block_by_func(self._on_autostart_toggled)
+        self._item_autostart.set_active(autostart_enabled)
+        self._item_autostart.handler_unblock_by_func(self._on_autostart_toggled)
+
+        self._item_autohide.handler_block_by_func(self._on_autohide_toggled)
+        self._item_autohide.set_active(autohide_enabled if autostart_enabled else False)
+        self._item_autohide.set_sensitive(autostart_enabled)
+        self._item_autohide.handler_unblock_by_func(self._on_autohide_toggled)
+
+    def _on_autostart_toggled(self, item):
+        desired = item.get_active()
+        if not self._ui.set_autostart_enabled(desired):
+            self._sync_autostart_state()
+
+    def _on_autohide_toggled(self, item):
+        desired = item.get_active()
+        if not self._ui.set_autostart_hidden(desired):
+            self._sync_autostart_state()
+
+
 class UserInterface:
     """The input-remapper gtk window."""
 
@@ -122,6 +192,9 @@ class UserInterface:
 
         # now show the proper finished content of the window
         self.get("vertical-wrapper").set_opacity(1)
+        self._tray_icon = TrayIcon(self)
+        if os.environ.get("INPUT_REMAPPER_START_HIDDEN") == "1":
+            self.close()
 
     def _build_ui(self):
         """Build the window from stylesheet and gladefile."""
@@ -175,7 +248,7 @@ class UserInterface:
         LinkGameDropdown(
             message_broker, controller, self.get("preset_game_link_combo")
         )
-        GameAutoSwitcher(controller.data_manager)
+        GameAutoSwitcher(controller.data_manager, message_broker)
         ReleaseCombinationSwitch(
             message_broker, controller, self.get("release-combination-switch")
         )
@@ -379,6 +452,11 @@ class UserInterface:
         logger.debug("Closing window")
         self.window.hide()
 
+    def show_window(self):
+        """Show and focus the window."""
+        self.window.show()
+        self.window.present()
+
     def update_combination_label(self, mapping: MappingData):
         """Listens for mapping and updates the combination label."""
         label: Gtk.Label = self.get("combination-label")
@@ -401,7 +479,103 @@ class UserInterface:
                 pass
 
     def on_gtk_close(self, *_):
-        self.controller.close()
+        self.close()
+        return True
+
+    def _autostart_user_path(self) -> str:
+        return os.path.join(
+            os.path.expanduser("~"), ".config", "autostart", AUTOSTART_FILENAME
+        )
+
+    def _autostart_system_path(self) -> str:
+        return os.path.join("/etc", "xdg", "autostart", AUTOSTART_FILENAME)
+
+    def _read_autostart_file(self, path: str) -> Dict[str, str]:
+        data: Dict[str, str] = {}
+        try:
+            with open(path, "r", encoding="utf-8", errors="ignore") as handle:
+                for line in handle:
+                    if "=" not in line:
+                        continue
+                    key, value = line.strip().split("=", 1)
+                    data[key.strip()] = value.strip()
+        except OSError:
+            return {}
+        return data
+
+    def _autostart_file_disabled(self, path: str) -> bool:
+        try:
+            with open(path, "r", encoding="utf-8", errors="ignore") as handle:
+                for line in handle:
+                    if "=" not in line:
+                        continue
+                    key, value = line.strip().split("=", 1)
+                    key = key.strip().lower()
+                    value = value.strip().lower()
+                    if key == "hidden" and value == "true":
+                        return True
+                    if key == "x-gnome-autostart-enabled" and value == "false":
+                        return True
+        except OSError:
+            return False
+        return False
+
+    def get_autostart_enabled(self) -> bool:
+        user_path = self._autostart_user_path()
+        if os.path.isfile(user_path):
+            return not self._autostart_file_disabled(user_path)
+        return os.path.isfile(self._autostart_system_path())
+
+    def get_autostart_hidden(self) -> bool:
+        user_path = self._autostart_user_path()
+        if not os.path.isfile(user_path):
+            return False
+        data = self._read_autostart_file(user_path)
+        value = data.get(AUTOSTART_HIDDEN_KEY)
+        if value is not None:
+            return value.strip().lower() == "true"
+        exec_value = data.get("Exec", "")
+        return "INPUT_REMAPPER_START_HIDDEN=1" in exec_value
+
+    def set_autostart_enabled(self, enabled: bool) -> bool:
+        user_path = self._autostart_user_path()
+        try:
+            os.makedirs(os.path.dirname(user_path), exist_ok=True)
+            self._write_autostart_file(user_path, enabled, self.get_autostart_hidden())
+            return True
+        except OSError as exc:
+            logger.warning("Failed to update autostart: %s", exc)
+            return False
+
+    def set_autostart_hidden(self, hidden: bool) -> bool:
+        user_path = self._autostart_user_path()
+        try:
+            os.makedirs(os.path.dirname(user_path), exist_ok=True)
+            self._write_autostart_file(user_path, self.get_autostart_enabled(), hidden)
+            return True
+        except OSError as exc:
+            logger.warning("Failed to update autostart hidden: %s", exc)
+            return False
+
+    def _write_autostart_file(self, path: str, enabled: bool, hidden: bool) -> None:
+        exec_cmd = "input-remapper-gtk"
+        if hidden:
+            exec_cmd = "env INPUT_REMAPPER_START_HIDDEN=1 input-remapper-gtk"
+        lines = [
+            "[Desktop Entry]",
+            "Type=Application",
+            "Name=input-remapper-gtk",
+            f"Exec={exec_cmd}",
+            "Icon=input-remapper",
+            f"{AUTOSTART_HIDDEN_KEY}={'true' if hidden else 'false'}",
+        ]
+        if enabled:
+            lines.append("X-GNOME-Autostart-enabled=true")
+        else:
+            lines.append("Hidden=true")
+            lines.append("X-GNOME-Autostart-enabled=false")
+        with open(path, "w", encoding="utf-8") as handle:
+            handle.write("\n".join(lines) + "\n")
 
     def on_gtk_about_clicked(self, _):
         """Show the about/help dialog."""
