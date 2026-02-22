@@ -160,6 +160,19 @@ class TestSystemMapping(unittest.TestCase):
             # `evdev.ecodes.BTN.get(code)` returns an array of ['BTN_LEFT', 'BTN_MOUSE']
             self.assertEqual(keyboard_layout.get_name(BTN_LEFT), "BTN_LEFT")
 
+    def test_get_symbol_aliases(self):
+        keyboard_layout = KeyboardLayout()
+        keyboard_layout.clear()
+        keyboard_layout._set("KEY_1", 2)
+        keyboard_layout._set("comma", 51)
+        keyboard_layout._set("percent", 5)
+        keyboard_layout._set("space", 57)
+
+        self.assertEqual(keyboard_layout.get("1"), 2)
+        self.assertEqual(keyboard_layout.get(","), 51)
+        self.assertEqual(keyboard_layout.get("%"), 5)
+        self.assertEqual(keyboard_layout.get(" "), 57)
+
 
 if __name__ == "__main__":
     unittest.main()

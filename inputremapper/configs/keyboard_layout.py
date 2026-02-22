@@ -40,6 +40,35 @@ XMODMAP_FILENAME = "xmodmap.json"
 
 LAZY_LOAD = None
 
+USER_SYMBOL_ALIASES = {
+    ",": "comma",
+    ".": "period",
+    ";": "semicolon",
+    ":": "colon",
+    "/": "slash",
+    "\\": "backslash",
+    "'": "apostrophe",
+    '"': "quotedbl",
+    "`": "grave",
+    "-": "minus",
+    "_": "underscore",
+    "=": "equal",
+    "+": "plus",
+    "[": "bracketleft",
+    "]": "bracketright",
+    "{": "braceleft",
+    "}": "braceright",
+    "(": "parenleft",
+    ")": "parenright",
+    "%": "percent",
+    "&": "ampersand",
+    "*": "asterisk",
+    "!": "exclam",
+    "?": "question",
+    "@": "at",
+    " ": "space",
+}
+
 
 class KeyboardLayout:
     """Stores information about all available keycodes."""
@@ -160,6 +189,13 @@ class KeyboardLayout:
 
     def get(self, name: str) -> Optional[int]:
         """Return the code mapped to the key."""
+        if not isinstance(name, str):
+            name = str(name)
+
+        alias = self._resolve_user_alias(name)
+        if alias != name:
+            name = alias
+
         # the correct casing should be shown when asking the keyboard_layout
         # for stuff. indexing case insensitive to support old presets.
         if name not in self._mapping:
@@ -167,6 +203,11 @@ class KeyboardLayout:
             name = self._case_insensitive_mapping.get(str(name).lower())
 
         return self._mapping.get(name)
+
+    def _resolve_user_alias(self, name: str) -> str:
+        if len(name) == 1 and name.isdigit():
+            return f"KEY_{name}"
+        return USER_SYMBOL_ALIASES.get(name, name)
 
     def clear(self):
         """Remove all mapped keys. Only needed for tests."""
