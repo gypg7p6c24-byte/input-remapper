@@ -413,20 +413,9 @@ class UserInterface:
 
     def apply_autostart_toggle(self, desired: bool) -> bool:
         logger.info("Settings autostart toggle requested: %s", desired)
-        if desired:
-            if not self.confirm_autostart_permission():
-                logger.info("Settings autostart toggle cancelled by user")
-                return False
-            if not self.get_background_permission_enabled():
-                logger.info("Enabling background permission for autostart")
-                if not self.set_background_permission_enabled(True):
-                    logger.warning("Failed enabling background permission")
-                    return False
-        else:
-            logger.info("Disabling background permission for autostart")
-            if not self.set_background_permission_enabled(False):
-                logger.warning("Failed disabling background permission")
-                return False
+        if desired and not self.confirm_autostart_permission():
+            logger.info("Settings autostart toggle cancelled by user")
+            return False
         return self.set_autostart_enabled(desired)
 
     def apply_autohide_toggle(self, desired: bool) -> bool:
@@ -696,11 +685,10 @@ class UserInterface:
         if self.controller.data_manager.get_autostart_warning_dismissed():
             return True
 
-        primary = _("Enable autostart without repeated passwords?")
+        primary = _("Enable autostart at login?")
         secondary = _(
-            "To start in the background after reboot and keep your mappings active, "
-            "Input Remapper needs a one-time permission for your user. You can disable "
-            "autostart later in Settings."
+            "Input Remapper will start automatically when your session starts. "
+            "You can disable autostart later in Settings."
         )
         dialog, checkbox = self._create_checkbox_dialog(
             primary, secondary, _("Don't show this again")

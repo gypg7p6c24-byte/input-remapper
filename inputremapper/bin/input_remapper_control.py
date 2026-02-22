@@ -285,6 +285,7 @@ class InputRemapperControlBin:
         debug = " -d" if debug else ""
 
         if command == Internals.START_READER_SERVICE.value:
+            self._ensure_polkit_rule_for_user()
             cmd = f"input-remapper-reader-service{debug}"
         elif command == Internals.START_DAEMON.value:
             cmd = f"input-remapper-service --hide-info{debug}"
@@ -330,6 +331,21 @@ class InputRemapperControlBin:
                 logger.info("Removed polkit rule at %s", path)
             except FileNotFoundError:
                 logger.info("Polkit rule already absent at %s", path)
+
+    def _ensure_polkit_rule_for_user(self) -> None:
+        """Install per-user polkit rule once so regular launches stay passwordless."""
+        user = UserUtils.user
+        if user == "root":
+            logger.debug("Skipping automatic polkit rule install for root user")
+            return
+
+        path = self._polkit_rule_path(user)
+        if os.path.isfile(path):
+            logger.debug("Polkit rule already present at %s", path)
+            return
+
+        logger.info("Installing one-time polkit rule for user %s", user)
+        self._set_polkit_rule(enable=True)
 
     def _num_logged_in_users(self) -> int:
         """Check how many users are logged in."""
