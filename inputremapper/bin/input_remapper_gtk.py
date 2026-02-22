@@ -22,6 +22,7 @@
 from __future__ import annotations
 
 import atexit
+import os
 import sys
 from argparse import ArgumentParser
 from typing import Tuple
@@ -99,7 +100,11 @@ class InputRemapperGtkBin:
                 "This can cause problems while recording keys"
             )
 
-        InputRemapperGtkBin.start_reader_service()
+        start_hidden = os.environ.get("INPUT_REMAPPER_START_HIDDEN") == "1"
+        if start_hidden:
+            logger.info("Starting hidden: deferring reader-service startup")
+        else:
+            InputRemapperGtkBin.start_reader_service()
 
         daemon = Daemon.connect()
 

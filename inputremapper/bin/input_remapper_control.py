@@ -52,6 +52,7 @@ class Internals(Enum):
     # internal stuff that the gui uses
     START_DAEMON = "start-daemon"
     START_READER_SERVICE = "start-reader-service"
+    SET_POLKIT = "set-polkit"
 
 
 class Options:
@@ -63,6 +64,7 @@ class Options:
     key_names: str
     debug: bool
     version: str
+    polkit: Optional[str]
 
 
 class InputRemapperControlBin:
@@ -109,7 +111,9 @@ class InputRemapperControlBin:
 
         if options.command is not None:
             if options.command in [command.value for command in Internals]:
-                input_remapper_control.internals(options.command, options.debug)
+                input_remapper_control.internals(
+                    options.command, options.debug, options.polkit
+                )
             elif options.command in [command.value for command in Commands]:
                 from inputremapper.daemon import Daemon
 
@@ -273,7 +277,7 @@ class InputRemapperControlBin:
             logger.info("Asking daemon to autoload for %s", device)
             self.daemon.autoload_single(group.key, timeout=2000)
 
-    def internals(self, command: str, debug: True) -> None:
+    def internals(self, command: str, debug: True, polkit: Optional[str]) -> None:
         """Methods that are needed to get the gui to work and that require root.
 
         input-remapper-control should be started with sudo or pkexec for this.
@@ -284,6 +288,12 @@ class InputRemapperControlBin:
             cmd = f"input-remapper-reader-service{debug}"
         elif command == Internals.START_DAEMON.value:
             cmd = f"input-remapper-service --hide-info{debug}"
+        elif command == Internals.SET_POLKIT.value:
+            if polkit not in ("enable", "disable"):
+                logger.error("--polkit must be 'enable' or 'disable'")
+                sys.exit(2)
+            self._set_polkit_rule(enable=(polkit == "enable"))
+            return
         else:
             return
 
@@ -291,6 +301,35 @@ class InputRemapperControlBin:
         cmd = f"{cmd} &"
         logger.debug(f"Running `{cmd}`")
         os.system(cmd)
+
+    def _polkit_rule_path(self, user: str) -> str:
+        filename = f"90-input-remapper-{user}.rules"
+        return os.path.join("/etc", "polkit-1", "rules.d", filename)
+
+    def _set_polkit_rule(self, enable: bool) -> None:
+        user = UserUtils.user
+        path = self._polkit_rule_path(user)
+        rules_dir = os.path.dirname(path)
+
+        if enable:
+            os.makedirs(rules_dir, exist_ok=True)
+            rule = (
+                "polkit.addRule(function(action, subject) {\n"
+                f"  if (action.id == \"inputremapper\" && subject.user == \"{user}\""
+                " && subject.active) {\n"
+                "    return polkit.Result.YES;\n"
+                "  }\n"
+                "});\n"
+            )
+            with open(path, "w", encoding="utf-8") as handle:
+                handle.write(rule)
+            logger.info("Installed polkit rule at %s", path)
+        else:
+            try:
+                os.remove(path)
+                logger.info("Removed polkit rule at %s", path)
+            except FileNotFoundError:
+                logger.info("Polkit rule already absent at %s", path)
 
     def _num_logged_in_users(self) -> int:
         """Check how many users are logged in."""
@@ -409,6 +448,15 @@ class InputRemapperControlBin:
             dest="version",
             help="Print the version and exit",
             default=False,
+        )
+        parser.add_argument(
+            "--polkit",
+            action="store",
+            dest="polkit",
+            help="Enable or disable the polkit rule for password-less access",
+            choices=["enable", "disable"],
+            default=None,
+            metavar="STATE",
         )
 
         return parser.parse_args(sys.argv[1:])  # type: ignore

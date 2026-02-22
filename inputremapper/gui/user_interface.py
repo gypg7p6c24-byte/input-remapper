@@ -20,6 +20,7 @@
 
 """User Interface."""
 import os
+import subprocess
 from typing import Dict, Callable
 
 import gi
@@ -81,6 +82,7 @@ from inputremapper.gui.utils import (
 )
 from inputremapper.injection.injector import InjectorStateMessage
 from inputremapper.logging.logger import logger, COMMIT_HASH, VERSION, EVDEV_VERSION
+from inputremapper.user import UserUtils
 
 # https://cjenkins.wordpress.com/2012/05/08/use-gtksourceview-widget-in-glade/
 GObject.type_register(GtkSource.View)
@@ -110,14 +112,19 @@ class TrayIcon:
         self._item_show = Gtk.MenuItem(label=_("Show"))
         self._item_autostart = Gtk.CheckMenuItem(label=_("Autostart"))
         self._item_autohide = Gtk.CheckMenuItem(label=_("Auto Hidden"))
+        self._item_allow_background = Gtk.CheckMenuItem(
+            label=_("Allow Background Access")
+        )
         self._item_quit = Gtk.MenuItem(label=_("Quit"))
         self._item_show.connect("activate", self._on_show)
         self._item_autostart.connect("toggled", self._on_autostart_toggled)
         self._item_autohide.connect("toggled", self._on_autohide_toggled)
+        self._item_allow_background.connect("toggled", self._on_allow_background)
         self._item_quit.connect("activate", self._on_quit)
         self._menu.append(self._item_show)
         self._menu.append(self._item_autostart)
         self._menu.append(self._item_autohide)
+        self._menu.append(self._item_allow_background)
         self._menu.append(self._item_quit)
         self._menu.show_all()
         if APPINDICATOR_AVAILABLE:
@@ -158,6 +165,7 @@ class TrayIcon:
     def _sync_autostart_state(self):
         autostart_enabled = self._ui.get_autostart_enabled()
         autohide_enabled = self._ui.get_autostart_hidden()
+        background_enabled = self._ui.get_background_permission_enabled()
         self._item_autostart.handler_block_by_func(self._on_autostart_toggled)
         self._item_autostart.set_active(autostart_enabled)
         self._item_autostart.handler_unblock_by_func(self._on_autostart_toggled)
@@ -167,16 +175,33 @@ class TrayIcon:
         self._item_autohide.set_sensitive(autostart_enabled)
         self._item_autohide.handler_unblock_by_func(self._on_autohide_toggled)
 
+        self._item_allow_background.handler_block_by_func(self._on_allow_background)
+        self._item_allow_background.set_active(background_enabled)
+        self._item_allow_background.handler_unblock_by_func(self._on_allow_background)
+
     def _on_autostart_toggled(self, item):
         desired = item.get_active()
         if not self._ui.set_autostart_enabled(desired):
             self._sync_autostart_state()
             return
+        if desired and not self._ui.get_background_permission_enabled():
+            if self._ui.confirm_background_permission():
+                self._ui.set_background_permission_enabled(True)
         self._sync_autostart_state()
 
     def _on_autohide_toggled(self, item):
         desired = item.get_active()
         if not self._ui.set_autostart_hidden(desired):
+            self._sync_autostart_state()
+            return
+        self._sync_autostart_state()
+
+    def _on_allow_background(self, item):
+        desired = item.get_active()
+        if desired and not self._ui.confirm_background_permission():
+            self._sync_autostart_state()
+            return
+        if not self._ui.set_background_permission_enabled(desired):
             self._sync_autostart_state()
             return
         self._sync_autostart_state()
@@ -492,6 +517,7 @@ class UserInterface:
         """Show and focus the window."""
         self.window.show()
         self.window.present()
+        self.controller.refresh_groups()
 
     def update_combination_label(self, mapping: MappingData):
         """Listens for mapping and updates the combination label."""
@@ -525,6 +551,10 @@ class UserInterface:
 
     def _autostart_system_path(self) -> str:
         return os.path.join("/etc", "xdg", "autostart", AUTOSTART_FILENAME)
+
+    def _polkit_rule_path(self) -> str:
+        filename = f"90-input-remapper-{UserUtils.user}.rules"
+        return os.path.join("/etc", "polkit-1", "rules.d", filename)
 
     def _read_autostart_file(self, path: str) -> Dict[str, str]:
         data: Dict[str, str] = {}
@@ -575,6 +605,40 @@ class UserInterface:
             return value.strip().lower() == "true"
         exec_value = data.get("Exec", "")
         return "INPUT_REMAPPER_START_HIDDEN=1" in exec_value
+
+    def get_background_permission_enabled(self) -> bool:
+        path = self._polkit_rule_path()
+        try:
+            return os.path.isfile(path)
+        except OSError:
+            return False
+
+    def set_background_permission_enabled(self, enabled: bool) -> bool:
+        action = "enable" if enabled else "disable"
+        cmd = [
+            "pkexec",
+            "input-remapper-control",
+            "--command",
+            "set-polkit",
+            "--polkit",
+            action,
+        ]
+        exit_code = subprocess.call(cmd)
+        if exit_code != 0:
+            logger.warning("Failed to update polkit rule, code %s", exit_code)
+            return False
+        return True
+
+    def confirm_background_permission(self) -> bool:
+        primary = _("Allow Input Remapper to run without a password?")
+        secondary = _(
+            "This creates a system policy for your user so background access works "
+            "without prompts. You can disable it later."
+        )
+        dialog = self._create_dialog(primary, secondary)
+        response = dialog.run()
+        dialog.hide()
+        return response == Gtk.ResponseType.ACCEPT
 
     def set_autostart_enabled(self, enabled: bool) -> bool:
         user_path = self._autostart_user_path()
