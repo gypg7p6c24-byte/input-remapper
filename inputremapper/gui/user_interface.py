@@ -412,16 +412,21 @@ class UserInterface:
                 self._settings_autohide_switch.set_sensitive(autostart_enabled)
 
     def apply_autostart_toggle(self, desired: bool) -> bool:
+        logger.info("Settings autostart toggle requested: %s", desired)
         if desired:
             if not self.confirm_autostart_permission():
+                logger.info("Settings autostart toggle cancelled by user")
                 return False
             if not self.get_background_permission_enabled():
+                logger.info("Enabling background permission for autostart")
                 if not self.set_background_permission_enabled(True):
+                    logger.warning("Failed enabling background permission")
                     return False
         else:
-            if self.get_background_permission_enabled():
-                if not self.set_background_permission_enabled(False):
-                    return False
+            logger.info("Disabling background permission for autostart")
+            if not self.set_background_permission_enabled(False):
+                logger.warning("Failed disabling background permission")
+                return False
         return self.set_autostart_enabled(desired)
 
     def apply_autohide_toggle(self, desired: bool) -> bool:
@@ -429,15 +434,15 @@ class UserInterface:
             return False
         return self.set_autostart_hidden(desired)
 
-    def _on_settings_autostart_toggled(self, *_):
-        desired = self._settings_autostart_switch.get_active()
+    def _on_settings_autostart_toggled(self, _switch, state):
+        desired = bool(state)
         if not self.apply_autostart_toggle(desired):
             self.sync_settings_toggles()
             return True
         return False
 
-    def _on_settings_autohide_toggled(self, *_):
-        desired = self._settings_autohide_switch.get_active()
+    def _on_settings_autohide_toggled(self, _switch, state):
+        desired = bool(state)
         if not self.apply_autohide_toggle(desired):
             self.sync_settings_toggles()
             return True
@@ -649,12 +654,15 @@ class UserInterface:
     def get_background_permission_enabled(self) -> bool:
         path = self._polkit_rule_path()
         try:
-            return os.path.isfile(path)
+            enabled = os.path.isfile(path)
+            logger.info("Background permission rule present=%s path=%s", enabled, path)
+            return enabled
         except OSError:
             return False
 
     def set_background_permission_enabled(self, enabled: bool) -> bool:
         action = "enable" if enabled else "disable"
+        logger.info("Requesting background permission action=%s", action)
         cmd = [
             "pkexec",
             "input-remapper-control",
@@ -667,7 +675,22 @@ class UserInterface:
         if exit_code != 0:
             logger.warning("Failed to update polkit rule, code %s", exit_code)
             return False
+        if not enabled:
+            self._revoke_polkit_temp_authorization()
+        logger.info("Background permission action=%s succeeded", action)
         return True
+
+    def _revoke_polkit_temp_authorization(self) -> None:
+        """Best-effort revocation so next privileged action asks for password again."""
+        try:
+            exit_code = subprocess.call(
+                ["pkcheck", "--revoke-temp"],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+            logger.info("Polkit temporary authorization revoke exit_code=%s", exit_code)
+        except FileNotFoundError:
+            logger.info("pkcheck not found, skipping temporary authorization revoke")
 
     def confirm_autostart_permission(self) -> bool:
         if self.controller.data_manager.get_autostart_warning_dismissed():
