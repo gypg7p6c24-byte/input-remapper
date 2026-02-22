@@ -39,6 +39,10 @@ INITIAL_CONFIG = {
     "autoload": {},
     "game_bindings": {},
     "default_preset": {},
+    "ui": {
+        "hide_autohide_warning": False,
+        "hide_autostart_warning": False,
+    },
 }
 
 
@@ -145,6 +149,26 @@ class GlobalConfig:
                 del defaults[group_key]
         else:
             defaults[group_key] = preset
+        self._save_config()
+
+    def get_autohide_warning_dismissed(self) -> bool:
+        """Return whether the auto-hidden warning should be suppressed."""
+        return bool(self._config.get("ui", {}).get("hide_autohide_warning", False))
+
+    def set_autohide_warning_dismissed(self, dismissed: bool) -> None:
+        """Persist whether to suppress the auto-hidden warning."""
+        ui_config = self._config.setdefault("ui", {})
+        ui_config["hide_autohide_warning"] = bool(dismissed)
+        self._save_config()
+
+    def get_autostart_warning_dismissed(self) -> bool:
+        """Return whether the autostart warning should be suppressed."""
+        return bool(self._config.get("ui", {}).get("hide_autostart_warning", False))
+
+    def set_autostart_warning_dismissed(self, dismissed: bool) -> None:
+        """Persist whether to suppress the autostart warning."""
+        ui_config = self._config.setdefault("ui", {})
+        ui_config["hide_autostart_warning"] = bool(dismissed)
         self._save_config()
 
     def load_config(self, path: Optional[str] = None):

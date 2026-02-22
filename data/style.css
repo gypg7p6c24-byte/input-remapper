@@ -43,6 +43,12 @@
     color: alpha(currentColor, 0.5);
 }
 
+.compact-tabs button {
+    padding: 4px 10px;
+    min-height: 0;
+    min-width: 0;
+}
+
 /*
 @theme_bg_color
 @theme_selected_bg_color

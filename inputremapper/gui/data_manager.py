@@ -230,6 +230,22 @@ class DataManager:
         """Get the default preset for a group."""
         return self._config.get_default_preset(group_key)
 
+    def get_autohide_warning_dismissed(self) -> bool:
+        """Return whether the auto-hidden warning should be suppressed."""
+        return self._config.get_autohide_warning_dismissed()
+
+    def set_autohide_warning_dismissed(self, dismissed: bool) -> None:
+        """Persist whether to suppress the auto-hidden warning."""
+        self._config.set_autohide_warning_dismissed(dismissed)
+
+    def get_autostart_warning_dismissed(self) -> bool:
+        """Return whether the autostart warning should be suppressed."""
+        return self._config.get_autostart_warning_dismissed()
+
+    def set_autostart_warning_dismissed(self, dismissed: bool) -> None:
+        """Persist whether to suppress the autostart warning."""
+        self._config.set_autostart_warning_dismissed(dismissed)
+
     def set_game_binding(self, game_id: Optional[str]):
         """Bind the active preset to a game id (or remove the binding)."""
         if not self.active_preset or not self.active_group:

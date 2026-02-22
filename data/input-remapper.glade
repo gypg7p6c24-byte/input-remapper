@@ -435,7 +435,7 @@ Shortcut: ctrl + del</property>
                         <property name="opacity">0.5</property>
                         <property name="margin-top">6</property>
                         <property name="margin-bottom">7</property>
-                        <property name="label" translatable="yes">Link Game</property>
+                        <property name="label" translatable="yes">Link Game (Steam)</property>
                         <property name="xalign">1</property>
                       </object>
                       <packing>
@@ -1236,6 +1236,101 @@ Only relevant when mapping relative inputs (e.g. mouse) to absolute outputs (e.g
                 <property name="position">2</property>
               </packing>
             </child>
+            <child>
+              <object class="GtkBox" id="settings_page">
+                <property name="visible">True</property>
+                <property name="can-focus">False</property>
+                <property name="orientation">vertical</property>
+                <property name="margin-start">18</property>
+                <property name="margin-end">18</property>
+                <property name="margin-top">18</property>
+                <property name="margin-bottom">18</property>
+                <property name="spacing">12</property>
+                <child>
+                  <object class="GtkLabel" id="settings_title">
+                    <property name="visible">True</property>
+                    <property name="can-focus">False</property>
+                    <property name="label" translatable="yes">Settings</property>
+                    <attributes>
+                      <attribute name="weight" value="bold"/>
+                    </attributes>
+                  </object>
+                  <packing>
+                    <property name="expand">False</property>
+                    <property name="fill">True</property>
+                    <property name="position">0</property>
+                  </packing>
+                </child>
+                <child>
+                  <object class="GtkGrid" id="settings_grid">
+                    <property name="visible">True</property>
+                    <property name="can-focus">False</property>
+                    <property name="column-spacing">12</property>
+                    <property name="row-spacing">6</property>
+                    <child>
+                      <object class="GtkLabel">
+                        <property name="visible">True</property>
+                        <property name="can-focus">False</property>
+                        <property name="opacity">0.5</property>
+                        <property name="label" translatable="yes">Autostart</property>
+                        <property name="xalign">1</property>
+                      </object>
+                      <packing>
+                        <property name="left-attach">0</property>
+                        <property name="top-attach">0</property>
+                      </packing>
+                    </child>
+                    <child>
+                      <object class="GtkSwitch" id="settings_autostart_switch">
+                        <property name="visible">True</property>
+                        <property name="can-focus">True</property>
+                        <property name="halign">start</property>
+                        <property name="valign">center</property>
+                      </object>
+                      <packing>
+                        <property name="left-attach">1</property>
+                        <property name="top-attach">0</property>
+                      </packing>
+                    </child>
+                    <child>
+                      <object class="GtkLabel">
+                        <property name="visible">True</property>
+                        <property name="can-focus">False</property>
+                        <property name="opacity">0.5</property>
+                        <property name="label" translatable="yes">Auto Hidden</property>
+                        <property name="xalign">1</property>
+                      </object>
+                      <packing>
+                        <property name="left-attach">0</property>
+                        <property name="top-attach">1</property>
+                      </packing>
+                    </child>
+                    <child>
+                      <object class="GtkSwitch" id="settings_autohide_switch">
+                        <property name="visible">True</property>
+                        <property name="can-focus">True</property>
+                        <property name="halign">start</property>
+                        <property name="valign">center</property>
+                      </object>
+                      <packing>
+                        <property name="left-attach">1</property>
+                        <property name="top-attach">1</property>
+                      </packing>
+                    </child>
+                  </object>
+                  <packing>
+                    <property name="expand">False</property>
+                    <property name="fill">True</property>
+                    <property name="position">1</property>
+                  </packing>
+                </child>
+              </object>
+              <packing>
+                <property name="name">Settings</property>
+                <property name="title" translatable="yes">Settings</property>
+                <property name="position">3</property>
+              </packing>
+            </child>
           </object>
           <packing>
             <property name="expand">True</property>
@@ -1324,11 +1419,14 @@ Only relevant when mapping relative inputs (e.g. mouse) to absolute outputs (e.g
         <property name="has-subtitle">False</property>
         <property name="show-close-button">True</property>
         <child>
-          <object class="GtkStackSwitcher">
+          <object class="GtkStackSwitcher" id="main_stack_switcher">
             <property name="visible">True</property>
             <property name="can-focus">False</property>
             <property name="homogeneous">True</property>
             <property name="stack">main_stack</property>
+            <style>
+              <class name="compact-tabs"/>
+            </style>
           </object>
         </child>
         <child>

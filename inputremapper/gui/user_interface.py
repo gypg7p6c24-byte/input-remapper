@@ -21,24 +21,11 @@
 """User Interface."""
 import os
 import subprocess
-from typing import Dict, Callable
+from typing import Dict, Callable, Tuple
 
 import gi
 
-try:
-    gi.require_version("AppIndicator3", "0.1")
-except Exception:
-    pass
-
 from gi.repository import Gtk, GtkSource, Gdk, GObject
-
-try:
-    from gi.repository import AppIndicator3
-
-    APPINDICATOR_AVAILABLE = True
-except Exception:
-    AppIndicator3 = None
-    APPINDICATOR_AVAILABLE = False
 
 from inputremapper.configs.data import get_data_path
 from inputremapper.configs.input_config import InputCombination
@@ -78,6 +65,7 @@ from inputremapper.gui.messages.message_broker import (
 )
 from inputremapper.gui.messages.message_data import UserConfirmRequest
 from inputremapper.gui.utils import (
+    HandlerDisabled,
     gtk_iteration,
 )
 from inputremapper.injection.injector import InjectorStateMessage
@@ -108,103 +96,17 @@ class TrayIcon:
         self._icon = None
         self._indicator = None
 
-        self._menu = Gtk.Menu()
-        self._item_show = Gtk.MenuItem(label=_("Show"))
-        self._item_autostart = Gtk.CheckMenuItem(label=_("Autostart"))
-        self._item_autohide = Gtk.CheckMenuItem(label=_("Auto Hidden"))
-        self._item_allow_background = Gtk.CheckMenuItem(
-            label=_("Allow Background Access")
-        )
-        self._item_quit = Gtk.MenuItem(label=_("Quit"))
-        self._item_show.connect("activate", self._on_show)
-        self._item_autostart.connect("toggled", self._on_autostart_toggled)
-        self._item_autohide.connect("toggled", self._on_autohide_toggled)
-        self._item_allow_background.connect("toggled", self._on_allow_background)
-        self._item_quit.connect("activate", self._on_quit)
-        self._menu.append(self._item_show)
-        self._menu.append(self._item_autostart)
-        self._menu.append(self._item_autohide)
-        self._menu.append(self._item_allow_background)
-        self._menu.append(self._item_quit)
-        self._menu.show_all()
-        if APPINDICATOR_AVAILABLE:
-            self._indicator = AppIndicator3.Indicator.new(
-                "input-remapper",
-                "input-remapper",
-                AppIndicator3.IndicatorCategory.APPLICATION_STATUS,
-            )
-            self._indicator.set_status(AppIndicator3.IndicatorStatus.ACTIVE)
-            self._indicator.set_icon_full("input-remapper", "input-remapper")
-            self._indicator.set_menu(self._menu)
-            logger.info("Tray backend: AppIndicator")
-        else:
-            self._icon = Gtk.StatusIcon()
-            self._icon.set_from_icon_name("input-remapper")
-            self._icon.set_tooltip_text("input-remapper")
-            self._icon.connect("activate", self._on_activate)
-            self._icon.connect("popup-menu", self._on_popup_menu)
-            logger.info("Tray backend: StatusIcon")
-
-        self._sync_autostart_state()
+        # Prefer click-to-show behavior. StatusIcon supports activation, whereas
+        # AppIndicator only exposes a menu.
+        self._icon = Gtk.StatusIcon()
+        self._icon.set_from_icon_name("input-remapper")
+        self._icon.set_tooltip_text("input-remapper")
+        self._icon.connect("activate", self._on_activate)
+        logger.info("Tray backend: StatusIcon")
 
     def _on_activate(self, *_):
-        if self._ui.window.get_visible():
-            self._ui.close()
-        else:
+        if not self._ui.window.get_visible():
             self._ui.show_window()
-
-    def _on_popup_menu(self, _icon, button, time):
-        self._menu.popup(None, None, None, None, button, time)
-
-    def _on_show(self, *_):
-        self._ui.show_window()
-
-    def _on_quit(self, *_):
-        self._ui.controller.close()
-
-    def _sync_autostart_state(self):
-        autostart_enabled = self._ui.get_autostart_enabled()
-        autohide_enabled = self._ui.get_autostart_hidden()
-        background_enabled = self._ui.get_background_permission_enabled()
-        self._item_autostart.handler_block_by_func(self._on_autostart_toggled)
-        self._item_autostart.set_active(autostart_enabled)
-        self._item_autostart.handler_unblock_by_func(self._on_autostart_toggled)
-
-        self._item_autohide.handler_block_by_func(self._on_autohide_toggled)
-        self._item_autohide.set_active(autohide_enabled if autostart_enabled else False)
-        self._item_autohide.set_sensitive(autostart_enabled)
-        self._item_autohide.handler_unblock_by_func(self._on_autohide_toggled)
-
-        self._item_allow_background.handler_block_by_func(self._on_allow_background)
-        self._item_allow_background.set_active(background_enabled)
-        self._item_allow_background.handler_unblock_by_func(self._on_allow_background)
-
-    def _on_autostart_toggled(self, item):
-        desired = item.get_active()
-        if not self._ui.set_autostart_enabled(desired):
-            self._sync_autostart_state()
-            return
-        if desired and not self._ui.get_background_permission_enabled():
-            if self._ui.confirm_background_permission():
-                self._ui.set_background_permission_enabled(True)
-        self._sync_autostart_state()
-
-    def _on_autohide_toggled(self, item):
-        desired = item.get_active()
-        if not self._ui.set_autostart_hidden(desired):
-            self._sync_autostart_state()
-            return
-        self._sync_autostart_state()
-
-    def _on_allow_background(self, item):
-        desired = item.get_active()
-        if desired and not self._ui.confirm_background_permission():
-            self._sync_autostart_state()
-            return
-        if not self._ui.set_background_permission_enabled(desired):
-            self._sync_autostart_state()
-            return
-        self._sync_autostart_state()
 
 
 class UserInterface:
@@ -241,6 +143,7 @@ class UserInterface:
         self._create_components()
         self._connect_gtk_signals()
         self._connect_message_listener()
+        self._connect_settings_controls()
 
         self.window.show()
         # hide everything until stuff is populated
@@ -252,6 +155,7 @@ class UserInterface:
         # now show the proper finished content of the window
         self.get("vertical-wrapper").set_opacity(1)
         self._tray_icon = TrayIcon(self)
+        self.sync_settings_toggles()
         if os.environ.get("INPUT_REMAPPER_START_HIDDEN") == "1":
             self.close()
         else:
@@ -433,6 +337,97 @@ class UserInterface:
         self.message_broker.subscribe(
             MessageType.user_confirm_request, self._on_user_confirm_request
         )
+
+    def _connect_settings_controls(self):
+        """Attach handlers for settings toggles."""
+        self._settings_autostart_switch = self.get("settings_autostart_switch")
+        self._settings_autohide_switch = self.get("settings_autohide_switch")
+
+        if self._settings_autostart_switch is not None:
+            self._settings_autostart_switch.connect(
+                "state-set", self._on_settings_autostart_toggled
+            )
+        if self._settings_autohide_switch is not None:
+            self._settings_autohide_switch.connect(
+                "state-set", self._on_settings_autohide_toggled
+            )
+
+    def sync_settings_toggles(self):
+        """Keep settings toggles in sync with stored state."""
+        if self._settings_autostart_switch is None:
+            return
+
+        autostart_enabled = self.get_autostart_enabled()
+        autohide_enabled = self.get_autostart_hidden()
+
+        with HandlerDisabled(self._settings_autostart_switch, self._on_settings_autostart_toggled):
+            self._settings_autostart_switch.set_active(autostart_enabled)
+
+        if self._settings_autohide_switch is not None:
+            with HandlerDisabled(self._settings_autohide_switch, self._on_settings_autohide_toggled):
+                self._settings_autohide_switch.set_active(
+                    autohide_enabled if autostart_enabled else False
+                )
+                self._settings_autohide_switch.set_sensitive(autostart_enabled)
+
+    def apply_autostart_toggle(self, desired: bool) -> bool:
+        if desired:
+            if not self.confirm_autostart_permission():
+                return False
+            if not self.get_background_permission_enabled():
+                if not self.set_background_permission_enabled(True):
+                    return False
+        return self.set_autostart_enabled(desired)
+
+    def apply_autohide_toggle(self, desired: bool) -> bool:
+        if desired and not self.confirm_autohide():
+            return False
+        return self.set_autostart_hidden(desired)
+
+    def _on_settings_autostart_toggled(self, *_):
+        desired = self._settings_autostart_switch.get_active()
+        if not self.apply_autostart_toggle(desired):
+            self.sync_settings_toggles()
+            return True
+        return False
+
+    def _on_settings_autohide_toggled(self, *_):
+        desired = self._settings_autohide_switch.get_active()
+        if not self.apply_autohide_toggle(desired):
+            self.sync_settings_toggles()
+            return True
+        return False
+
+    def _create_checkbox_dialog(
+        self, primary: str, secondary: str, checkbox_label: str
+    ) -> Tuple[Gtk.MessageDialog, Gtk.CheckButton]:
+        dialog = self._create_dialog(primary, secondary)
+        checkbox = Gtk.CheckButton(label=checkbox_label)
+        checkbox.set_margin_top(6)
+        dialog.get_content_area().pack_end(checkbox, False, False, 0)
+        dialog.show_all()
+        return dialog, checkbox
+
+    def confirm_autohide(self) -> bool:
+        if self.controller.data_manager.get_autohide_warning_dismissed():
+            return True
+
+        primary = _("Auto Hidden Enabled")
+        secondary = _(
+            "The window will stay hidden on startup. You can reopen it from the tray "
+            "icon in the top bar by clicking the icon."
+        )
+        dialog, checkbox = self._create_checkbox_dialog(
+            primary, secondary, _("Don't show this again")
+        )
+        response = dialog.run()
+        dismissed = checkbox.get_active() and response == Gtk.ResponseType.ACCEPT
+        dialog.hide()
+
+        if dismissed:
+            self.controller.data_manager.set_autohide_warning_dismissed(True)
+
+        return response == Gtk.ResponseType.ACCEPT
 
     def _create_dialog(self, primary: str, secondary: str) -> Gtk.MessageDialog:
         """Create a message dialog with cancel and confirm buttons."""
@@ -629,15 +624,26 @@ class UserInterface:
             return False
         return True
 
-    def confirm_background_permission(self) -> bool:
-        primary = _("Allow Input Remapper to run without a password?")
+    def confirm_autostart_permission(self) -> bool:
+        if self.controller.data_manager.get_autostart_warning_dismissed():
+            return True
+
+        primary = _("Enable autostart without repeated passwords?")
         secondary = _(
-            "This creates a system policy for your user so background access works "
-            "without prompts. You can disable it later."
+            "To start in the background after reboot and keep your mappings active, "
+            "Input Remapper needs a one-time permission for your user. You can disable "
+            "autostart later in Settings."
         )
-        dialog = self._create_dialog(primary, secondary)
+        dialog, checkbox = self._create_checkbox_dialog(
+            primary, secondary, _("Don't show this again")
+        )
         response = dialog.run()
+        dismissed = checkbox.get_active() and response == Gtk.ResponseType.ACCEPT
         dialog.hide()
+
+        if dismissed:
+            self.controller.data_manager.set_autostart_warning_dismissed(True)
+
         return response == Gtk.ResponseType.ACCEPT
 
     def set_autostart_enabled(self, enabled: bool) -> bool:
