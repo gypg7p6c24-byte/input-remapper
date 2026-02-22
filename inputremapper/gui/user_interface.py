@@ -25,7 +25,22 @@ from typing import Dict, Callable, Tuple
 
 import gi
 
+import gi
+
+try:
+    gi.require_version("AppIndicator3", "0.1")
+except Exception:
+    pass
+
 from gi.repository import Gtk, GtkSource, Gdk, GObject
+
+try:
+    from gi.repository import AppIndicator3
+
+    APPINDICATOR_AVAILABLE = True
+except Exception:
+    AppIndicator3 = None
+    APPINDICATOR_AVAILABLE = False
 
 from inputremapper.configs.data import get_data_path
 from inputremapper.configs.input_config import InputCombination
@@ -95,19 +110,45 @@ class TrayIcon:
         self._ui = ui
         self._icon = None
         self._indicator = None
+        self._menu = Gtk.Menu()
+        self._item_show = Gtk.MenuItem(label=_("Show"))
+        self._item_quit = Gtk.MenuItem(label=_("Quit"))
+        self._item_show.connect("activate", self._on_show)
+        self._item_quit.connect("activate", self._on_quit)
+        self._menu.append(self._item_show)
+        self._menu.append(self._item_quit)
+        self._menu.show_all()
 
-        # Prefer click-to-show behavior. StatusIcon supports activation, whereas
-        # AppIndicator only exposes a menu.
-        self._icon = Gtk.StatusIcon()
-        self._icon.set_from_icon_name("input-remapper")
-        self._icon.set_tooltip_text("input-remapper")
-        self._icon.connect("activate", self._on_activate)
-        logger.info("Tray backend: StatusIcon")
+        if APPINDICATOR_AVAILABLE:
+            self._indicator = AppIndicator3.Indicator.new(
+                "input-remapper",
+                "input-remapper",
+                AppIndicator3.IndicatorCategory.APPLICATION_STATUS,
+            )
+            self._indicator.set_status(AppIndicator3.IndicatorStatus.ACTIVE)
+            self._indicator.set_icon_full("input-remapper", "input-remapper")
+            self._indicator.set_menu(self._menu)
+            logger.info("Tray backend: AppIndicator")
+        else:
+            self._icon = Gtk.StatusIcon()
+            self._icon.set_from_icon_name("input-remapper")
+            self._icon.set_tooltip_text("input-remapper")
+            self._icon.connect("activate", self._on_activate)
+            self._icon.connect("popup-menu", self._on_popup_menu)
+            logger.info("Tray backend: StatusIcon")
 
     def _on_activate(self, *_):
         if not self._ui.window.get_visible():
             self._ui.show_window()
 
+    def _on_popup_menu(self, _icon, button, time):
+        self._menu.popup(None, None, None, None, button, time)
+
+    def _on_show(self, *_):
+        self._ui.show_window()
+
+    def _on_quit(self, *_):
+        self._ui.controller.close()
 
 class UserInterface:
     """The input-remapper gtk window."""
