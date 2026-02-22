@@ -418,6 +418,10 @@ class UserInterface:
             if not self.get_background_permission_enabled():
                 if not self.set_background_permission_enabled(True):
                     return False
+        else:
+            if self.get_background_permission_enabled():
+                if not self.set_background_permission_enabled(False):
+                    return False
         return self.set_autostart_enabled(desired)
 
     def apply_autohide_toggle(self, desired: bool) -> bool:
