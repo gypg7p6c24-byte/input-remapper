@@ -12,6 +12,17 @@
 
 <p align="center"><img src="readme/pylint.svg"/> <img src="readme/coverage.svg"/></p>
 
+## Fork Status
+
+This repository is a modified fork of the official Input Remapper project:
+https://github.com/sezanzeb/input-remapper
+
+This fork is not an official upstream release. It is actively developed and validated through pilot sessions before proposing upstream changes.
+
+Branch policy for this fork:
+- `main`: stable branch used as production baseline.
+- `dev`: integration branch for ongoing changes and tests.
+
 
 <p align="center">
   <img src="readme/screenshot.png" width="48%"/>
