@@ -103,6 +103,7 @@ class Controller:
 
         self.button_left_warn = False
         self._resume_injection_after_recording = False
+        self._recording_combination_dirty = False
         self._attach_to_events()
 
     def set_gui(self, gui: UserInterface):
@@ -163,7 +164,8 @@ class Controller:
 
     def _on_combination_recorded(self, data: CombinationRecorded):
         combination = self._auto_use_as_analog(data.combination)
-        self.update_combination(combination)
+        if self.update_combination(combination, persist=False):
+            self._recording_combination_dirty = True
 
     def _format_status_bar_validation_errors(self) -> Optional[Tuple[str, str]]:
         if not self.data_manager.active_preset:
@@ -372,19 +374,22 @@ class Controller:
 
         return combination
 
-    def update_combination(self, combination: InputCombination):
+    def update_combination(
+        self, combination: InputCombination, persist: bool = True
+    ) -> bool:
         """Update the input_combination of the active mapping."""
         combination = self._auto_use_as_analog(combination)
 
         try:
             self.data_manager.update_mapping(input_combination=combination)
-            self.save()
+            if persist:
+                self.save()
         except KeyError:
             self.show_status(
                 CTX_MAPPING,
                 f'"{combination.beautify()}" already mapped to something else',
             )
-            return
+            return False
 
         if combination.is_problematic():
             self.show_status(
@@ -396,6 +401,7 @@ class Controller:
                     + 'advanced "Release Input" toggle.'
                 ),
             )
+        return True
 
     def move_input_config_in_combination(
         self,
@@ -565,7 +571,7 @@ class Controller:
         self.data_manager.load_mapping(input_combination)
         self.load_input_config(input_combination[0])
 
-    def update_mapping(self, **changes):
+    def update_mapping(self, persist: bool = True, **changes):
         """Update the active_mapping with the given keywords and values."""
         if "mapping_type" in changes.keys():
             if not (changes := self._change_mapping_type(changes)):
@@ -575,7 +581,8 @@ class Controller:
                 return
 
         self.data_manager.update_mapping(**changes)
-        self.save()
+        if persist:
+            self.save()
 
     def create_mapping(self):
         """Create a new empty mapping in the active_preset."""
@@ -654,6 +661,7 @@ class Controller:
         Updates the active_mapping.input_combination with the recorded events.
         """
         self._resume_injection_after_recording = False
+        self._recording_combination_dirty = False
 
         def begin_recording():
             logger.debug("Recording Keys")
@@ -672,6 +680,13 @@ class Controller:
                             )
                     except DataManagementError:
                         pass
+
+                if self._recording_combination_dirty:
+                    self._recording_combination_dirty = False
+                    active_mapping = self.data_manager.active_mapping
+                    if active_mapping is not None and active_mapping.get_error() is None:
+                        self.save()
+
                 # Clear the "Pausing injection..." status once recording ends.
                 self.show_status(CTX_APPLY, None)
 

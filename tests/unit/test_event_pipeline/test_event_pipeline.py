@@ -1953,6 +1953,47 @@ class TestAbsToBtn(EventPipelineTestBase):
         self.assertEqual(keyboard_history.count((EV_KEY, a, 0)), 1)
         self.assertEqual(len(forwarded_history), 0)
 
+    async def test_abs_switch_opposite_directions_without_neutral(self):
+        """Switching from one axis direction to the opposite should not stall.
+
+        Reproduces the case where left-direction remains active and right-direction
+        does not trigger until the stick is released and pressed again.
+        """
+
+        mapping_left = Mapping.from_combination(
+            InputCombination(
+                [InputConfig(type=EV_ABS, code=ABS_X, analog_threshold=-30)]
+            ),
+            output_symbol="a",
+        )
+        mapping_right = Mapping.from_combination(
+            InputCombination(
+                [InputConfig(type=EV_ABS, code=ABS_X, analog_threshold=30)]
+            ),
+            output_symbol="d",
+        )
+        preset = Preset()
+        preset.add(mapping_left)
+        preset.add(mapping_right)
+
+        a = keyboard_layout.get("a")
+        d = keyboard_layout.get("d")
+
+        event_reader = self.create_event_reader(preset, fixtures.gamepad)
+
+        await self.send_events(
+            [
+                InputEvent.abs(ABS_X, int(MIN_ABS * 0.8)),
+                InputEvent.abs(ABS_X, int(MAX_ABS * 0.8)),
+            ],
+            event_reader,
+        )
+
+        keyboard_history = self.global_uinputs.get_uinput("keyboard").write_history
+        self.assertEqual(keyboard_history.count((EV_KEY, a, 1)), 1)
+        self.assertEqual(keyboard_history.count((EV_KEY, a, 0)), 1)
+        self.assertEqual(keyboard_history.count((EV_KEY, d, 1)), 1)
+
 
 @test_setup
 class TestRelToRel(EventPipelineTestBase):

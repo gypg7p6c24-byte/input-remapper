@@ -47,6 +47,9 @@ import tomllib
 from install.data_files import DATA_DIR
 
 
+PACKAGES_DIR_ENV = "INPUT_REMAPPER_PACKAGES_DIR"
+
+
 def _key(path) -> int:
     favorability = 0
 
@@ -94,6 +97,12 @@ def _get_packages_dir() -> str:
 
     For example "/usr/lib/python3.13
     """
+    override = os.getenv(PACKAGES_DIR_ENV)
+    if override:
+        package_dir = os.path.abspath(os.path.expanduser(override))
+        print(f'Using "{package_dir}" from ${PACKAGES_DIR_ENV}')
+        return package_dir
+
     packages_dirs = sorted(sys.path, key=_key)
     packages_dir = packages_dirs[0]
     print(f'Picked "{packages_dir}" from {packages_dirs}')

@@ -193,13 +193,13 @@ class HandlerDisabled:
         except TypeError as error:
             # if nothing is connected to the given signal, it is not critical
             # at all
-            logger.warning('HandlerDisabled entry failed: "%s"', error)
+            logger.debug('HandlerDisabled entry skipped: "%s"', error)
 
     def __exit__(self, *_):
         try:
             self.widget.handler_unblock_by_func(self.handler)
         except TypeError as error:
-            logger.warning('HandlerDisabled exit failed: "%s"', error)
+            logger.debug('HandlerDisabled exit skipped: "%s"', error)
 
 
 def gtk_iteration(iterations=0):

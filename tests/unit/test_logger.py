@@ -24,6 +24,7 @@ import logging
 import os
 import shutil
 import unittest
+from unittest.mock import patch
 
 import evdev
 
@@ -31,6 +32,11 @@ from inputremapper.configs.paths import PathUtils
 from inputremapper.logging.logger import (
     logger,
     ColorfulFormatter,
+    monitoring_enabled,
+    monitor_env_prefix,
+    monitor_env_vars,
+    MONITOR_ENV,
+    MONITOR_PATH_ENV,
 )
 from tests.lib.test_setup import test_setup
 
@@ -145,6 +151,26 @@ class TestLogger(unittest.TestCase):
 
             self.assertNotIn("debug", content)
             self.assertNotIn("789", content)
+
+    def test_monitoring_disabled_by_default(self):
+        with patch.dict(os.environ, {}, clear=True):
+            self.assertFalse(monitoring_enabled())
+            self.assertEqual(monitor_env_prefix(), "")
+            self.assertEqual(monitor_env_vars(), {})
+
+    def test_monitoring_enabled_via_env(self):
+        with patch.dict(
+            os.environ,
+            {
+                MONITOR_ENV: "1",
+                MONITOR_PATH_ENV: "/tmp/input-remapper-monitor.log",
+            },
+            clear=True,
+        ):
+            self.assertTrue(monitoring_enabled())
+            env_vars = monitor_env_vars()
+            self.assertEqual(env_vars.get(MONITOR_ENV), "1")
+            self.assertIn("INPUT_REMAPPER_MONITOR_PATH=", monitor_env_prefix())
 
 
 if __name__ == "__main__":

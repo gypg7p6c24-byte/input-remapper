@@ -22,6 +22,8 @@
 
 import collections
 import os
+import shutil
+import subprocess
 import time
 import unittest
 from unittest.mock import patch, MagicMock
@@ -35,6 +37,7 @@ from inputremapper.daemon import Daemon
 from inputremapper.groups import groups
 from inputremapper.injection.global_uinputs import GlobalUInputs, FrontendUInput
 from inputremapper.injection.mapping_handlers.mapping_parser import MappingParser
+from inputremapper.user import UserUtils
 from tests.lib.test_setup import test_setup
 from tests.lib.tmp import tmp
 
@@ -401,6 +404,30 @@ class TestControl(unittest.TestCase):
             os_system_patch.assert_called_once()
             self.assertIn("input-remapper-service", os_system_patch.call_args.args[0])
             self.assertIn("-d", os_system_patch.call_args.args[0])
+
+    def test_uninstall_removes_only_current_user_polkit_rule(self):
+        removed_paths = []
+
+        with patch.object(
+            self.input_remapper_control,
+            "_run_optional_command",
+            return_value=0,
+        ):
+            with patch.object(
+                self.input_remapper_control,
+                "_remove_path",
+                side_effect=lambda path: removed_paths.append(path),
+            ):
+                with patch.object(
+                    subprocess,
+                    "call",
+                    return_value=1,
+                ):
+                    with patch.object(shutil, "which", return_value=None):
+                        self.input_remapper_control._uninstall(remove_config=False)
+
+        expected_rule = self.input_remapper_control._polkit_rule_path(UserUtils.user)
+        self.assertIn(expected_rule, removed_paths)
 
 
 if __name__ == "__main__":

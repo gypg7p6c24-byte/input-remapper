@@ -1,7 +1,7 @@
 #!/bin/bash
 if [ -d "/run/systemd/system/" ]; then
   # old name, those lines should at some point be removed from postinst
-  pkill -f key-mapper-service
+  pkill -f key-mapper-service 2> /dev/null || true
   systemctl disable key-mapper 2> /dev/null || true
   systemctl stop key-mapper 2> /dev/null || true
 
@@ -11,7 +11,11 @@ if [ -d "/run/systemd/system/" ]; then
   unlink /etc/systemd/system/input-remapper.service || true
   unlink /etc/systemd/system/default.target.wants/input-remapper-daemon.service || true
 
-  pkill -f input-remapper-service  # might have been started by the gui previously
-  systemctl enable input-remapper
-  systemctl start input-remapper
+  # Never make package installation fail just because the service cannot be
+  # restarted in the current desktop/packagekit context. The GUI can start the
+  # service later when required.
+  pkill -f input-remapper-service 2> /dev/null || true
+  systemctl daemon-reload 2> /dev/null || true
+  systemctl enable input-remapper 2> /dev/null || true
+  systemctl start input-remapper 2> /dev/null || true
 fi

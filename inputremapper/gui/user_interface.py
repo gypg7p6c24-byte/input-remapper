@@ -21,26 +21,36 @@
 """User Interface."""
 import os
 import subprocess
-from typing import Dict, Callable, Tuple
+from typing import Dict, Callable, Tuple, Optional
 
 import gi
 
-import gi
+from gi.repository import Gtk, GtkSource, Gdk, GObject, GLib
 
-try:
-    gi.require_version("AppIndicator3", "0.1")
-except Exception:
-    pass
+APPINDICATOR_NAMESPACE: Optional[str] = None
+AppIndicator = None
 
-from gi.repository import Gtk, GtkSource, Gdk, GObject
+# Debian commonly ships Ayatana while Ubuntu often keeps AppIndicator3.
+# Accept either namespace and fall back to Gtk.StatusIcon if neither exists.
+for _namespace in ("AyatanaAppIndicator3", "AppIndicator3"):
+    try:
+        gi.require_version(_namespace, "0.1")
+    except (ValueError, ImportError):
+        continue
 
-try:
-    from gi.repository import AppIndicator3
+    try:
+        if _namespace == "AyatanaAppIndicator3":
+            from gi.repository import AyatanaAppIndicator3 as AppIndicator
+        else:
+            from gi.repository import AppIndicator3 as AppIndicator
 
-    APPINDICATOR_AVAILABLE = True
-except Exception:
-    AppIndicator3 = None
-    APPINDICATOR_AVAILABLE = False
+        APPINDICATOR_NAMESPACE = _namespace
+        break
+    except Exception:
+        AppIndicator = None
+        APPINDICATOR_NAMESPACE = None
+
+APPINDICATOR_AVAILABLE = AppIndicator is not None
 
 from inputremapper.configs.data import get_data_path
 from inputremapper.configs.input_config import InputCombination
@@ -84,7 +94,13 @@ from inputremapper.gui.utils import (
     gtk_iteration,
 )
 from inputremapper.injection.injector import InjectorStateMessage
-from inputremapper.logging.logger import logger, COMMIT_HASH, VERSION, EVDEV_VERSION
+from inputremapper.logging.logger import (
+    logger,
+    COMMIT_HASH,
+    VERSION,
+    EVDEV_VERSION,
+    monitor_env_vars,
+)
 from inputremapper.user import UserUtils
 
 # https://cjenkins.wordpress.com/2012/05/08/use-gtksourceview-widget-in-glade/
@@ -120,15 +136,15 @@ class TrayIcon:
         self._menu.show_all()
 
         if APPINDICATOR_AVAILABLE:
-            self._indicator = AppIndicator3.Indicator.new(
+            self._indicator = AppIndicator.Indicator.new(
                 "input-remapper",
                 "input-remapper",
-                AppIndicator3.IndicatorCategory.APPLICATION_STATUS,
+                AppIndicator.IndicatorCategory.APPLICATION_STATUS,
             )
-            self._indicator.set_status(AppIndicator3.IndicatorStatus.ACTIVE)
+            self._indicator.set_status(AppIndicator.IndicatorStatus.ACTIVE)
             self._indicator.set_icon_full("input-remapper", "input-remapper")
             self._indicator.set_menu(self._menu)
-            logger.info("Tray backend: AppIndicator")
+            logger.info("Tray backend: %s", APPINDICATOR_NAMESPACE)
         else:
             self._icon = Gtk.StatusIcon()
             self._icon.set_from_icon_name("input-remapper")
@@ -197,6 +213,9 @@ class UserInterface:
         self.get("vertical-wrapper").set_opacity(1)
         self._tray_icon = TrayIcon(self)
         self.sync_settings_toggles()
+        # Drop any temporary polkit auth left by startup actions (e.g. reader start)
+        # so enabling autostart can request authentication explicitly.
+        self._revoke_polkit_temp_authorization()
         if os.environ.get("INPUT_REMAPPER_START_HIDDEN") == "1":
             self.close()
         else:
@@ -383,6 +402,29 @@ class UserInterface:
         """Attach handlers for settings toggles."""
         self._settings_autostart_switch = self.get("settings_autostart_switch")
         self._settings_autohide_switch = self.get("settings_autohide_switch")
+        self._settings_uninstall_button = self.get("settings_uninstall_button")
+        self._settings_update_current_version = self.get(
+            "settings_update_current_version"
+        )
+        self._settings_update_available_version = self.get(
+            "settings_update_available_version"
+        )
+        self._settings_update_channel_combo = self.get("settings_update_channel_combo")
+        self._settings_update_check_button = self.get("settings_update_check_button")
+        self._settings_update_install_button = self.get(
+            "settings_update_install_button"
+        )
+        logger.info(
+            "Settings widgets found: autostart=%s autohide=%s uninstall=%s update_current=%s update_available=%s update_channel=%s update_check=%s update_install=%s",
+            self._settings_autostart_switch is not None,
+            self._settings_autohide_switch is not None,
+            self._settings_uninstall_button is not None,
+            self._settings_update_current_version is not None,
+            self._settings_update_available_version is not None,
+            self._settings_update_channel_combo is not None,
+            self._settings_update_check_button is not None,
+            self._settings_update_install_button is not None,
+        )
 
         if self._settings_autostart_switch is not None:
             self._settings_autostart_switch.connect(
@@ -392,6 +434,15 @@ class UserInterface:
             self._settings_autohide_switch.connect(
                 "state-set", self._on_settings_autohide_toggled
             )
+        if self._settings_update_current_version is not None:
+            self._settings_update_current_version.set_text(VERSION)
+        if self._settings_update_available_version is not None:
+            self._settings_update_available_version.set_text(_("Not checked yet"))
+        if self._settings_update_channel_combo is not None:
+            self._settings_update_channel_combo.set_active(0)
+        if self._settings_update_install_button is not None:
+            self._settings_update_install_button.set_sensitive(False)
+        # uninstall button is connected through GtkBuilder signal
 
     def sync_settings_toggles(self):
         """Keep settings toggles in sync with stored state."""
@@ -413,10 +464,42 @@ class UserInterface:
 
     def apply_autostart_toggle(self, desired: bool) -> bool:
         logger.info("Settings autostart toggle requested: %s", desired)
-        if desired and not self.confirm_autostart_permission():
-            logger.info("Settings autostart toggle cancelled by user")
+        if desired:
+            if not self.confirm_autostart_permission():
+                logger.info("Settings autostart toggle cancelled by user")
+                return False
+
+            # Force pkexec to ask again instead of reusing auth_admin_keep from a
+            # previous privileged action in this session.
+            self._revoke_polkit_temp_authorization()
+
+            if not self.set_background_permission_enabled(True):
+                logger.info(
+                    "Settings autostart toggle failed while updating background permission"
+                )
+                return False
+
+            if not self.set_autostart_enabled(True):
+                logger.warning(
+                    "Autostart file update failed, rolling back background permission"
+                )
+                self.set_background_permission_enabled(False)
+                return False
+
+            return True
+
+        # disable path: write user autostart first, then drop permission.
+        if not self.set_autostart_enabled(False):
             return False
-        return self.set_autostart_enabled(desired)
+
+        if not self.set_background_permission_enabled(False):
+            logger.warning(
+                "Background permission disable failed, rolling back autostart file"
+            )
+            self.set_autostart_enabled(True)
+            return False
+
+        return True
 
     def apply_autohide_toggle(self, desired: bool) -> bool:
         if desired and not self.confirm_autohide():
@@ -425,17 +508,91 @@ class UserInterface:
 
     def _on_settings_autostart_toggled(self, _switch, state):
         desired = bool(state)
+        logger.info("Settings autostart switch state-set=%s", desired)
         if not self.apply_autostart_toggle(desired):
             self.sync_settings_toggles()
             return True
+        GLib.idle_add(self.sync_settings_toggles)
         return False
 
     def _on_settings_autohide_toggled(self, _switch, state):
         desired = bool(state)
+        logger.info("Settings autohide switch state-set=%s", desired)
         if not self.apply_autohide_toggle(desired):
             self.sync_settings_toggles()
             return True
+        GLib.idle_add(self.sync_settings_toggles)
         return False
+
+    def _on_settings_uninstall_clicked(self, *_):
+        logger.info("Settings uninstall button clicked")
+        # Run dialog on idle to avoid immediately consuming the same click event that
+        # opened it (which may close it instantly on some desktops).
+        GLib.idle_add(self._run_settings_uninstall_dialog)
+
+    def _run_settings_uninstall_dialog(self):
+        primary = _("Uninstall input-remapper?")
+        secondary = _(
+            "This will remove the application and its system permissions. "
+            "By default, your presets and local configuration are kept."
+        )
+        dialog, checkbox = self._create_checkbox_dialog(
+            primary,
+            secondary,
+            _("Also remove presets and local configuration"),
+        )
+        response = dialog.run()
+        remove_config = checkbox.get_active()
+        dialog.hide()
+        logger.info(
+            "Settings uninstall dialog response=%s remove_config=%s",
+            response,
+            remove_config,
+        )
+
+        if response != Gtk.ResponseType.ACCEPT:
+            return False
+
+        cmd = [
+            "pkexec",
+            "input-remapper-control",
+            "--command",
+            "uninstall",
+        ]
+        if remove_config:
+            cmd.append("--remove-config")
+
+        logger.info(
+            "Settings uninstall requested remove_config=%s command=%s",
+            remove_config,
+            cmd,
+        )
+        env = os.environ.copy()
+        env.update(monitor_env_vars())
+        exit_code = subprocess.call(cmd, env=env)
+        if exit_code != 0:
+            logger.warning("Uninstall command failed with code %s", exit_code)
+            error_dialog = Gtk.MessageDialog(
+                self.window,
+                Gtk.DialogFlags.MODAL | Gtk.DialogFlags.DESTROY_WITH_PARENT,
+                Gtk.MessageType.ERROR,
+                Gtk.ButtonsType.CLOSE,
+                _("Uninstall failed"),
+            )
+            error_dialog.format_secondary_text(
+                _("Could not complete uninstall. Please check the logs for details.")
+            )
+            error_dialog.run()
+            error_dialog.hide()
+            return False
+
+        logger.info("Uninstall command completed successfully")
+        self.controller.close()
+        return False
+
+    def on_gtk_settings_uninstall_clicked(self, *_):
+        """Glade signal fallback for the uninstall button."""
+        self._on_settings_uninstall_clicked()
 
     def _create_checkbox_dialog(
         self, primary: str, secondary: str, checkbox_label: str
@@ -590,6 +747,24 @@ class UserInterface:
         filename = f"90-input-remapper-{UserUtils.user}.rules"
         return os.path.join("/etc", "polkit-1", "rules.d", filename)
 
+    def _background_permission_allowed_non_interactive(self) -> bool:
+        try:
+            result = subprocess.run(
+                [
+                    "pkcheck",
+                    "--action-id",
+                    "inputremapper",
+                    "--process",
+                    str(os.getpid()),
+                ],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                check=False,
+            )
+            return result.returncode == 0
+        except FileNotFoundError:
+            return False
+
     def _read_autostart_file(self, path: str) -> Dict[str, str]:
         data: Dict[str, str] = {}
         try:
@@ -642,12 +817,18 @@ class UserInterface:
 
     def get_background_permission_enabled(self) -> bool:
         path = self._polkit_rule_path()
-        try:
-            enabled = os.path.isfile(path)
-            logger.info("Background permission rule present=%s path=%s", enabled, path)
-            return enabled
-        except OSError:
-            return False
+        rule_present = os.path.isfile(path)
+        pkcheck_allowed = self._background_permission_allowed_non_interactive()
+        enabled = rule_present or pkcheck_allowed
+        logger.info(
+            "Background permission check enabled=%s rule_present=%s pkcheck_allowed=%s path=%s user=%s",
+            enabled,
+            rule_present,
+            pkcheck_allowed,
+            path,
+            UserUtils.user,
+        )
+        return enabled
 
     def set_background_permission_enabled(self, enabled: bool) -> bool:
         action = "enable" if enabled else "disable"
@@ -660,7 +841,9 @@ class UserInterface:
             "--polkit",
             action,
         ]
-        exit_code = subprocess.call(cmd)
+        env = os.environ.copy()
+        env.update(monitor_env_vars())
+        exit_code = subprocess.call(cmd, env=env)
         if exit_code != 0:
             logger.warning("Failed to update polkit rule, code %s", exit_code)
             return False

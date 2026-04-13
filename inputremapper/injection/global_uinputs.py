@@ -23,7 +23,7 @@ import evdev
 
 import inputremapper.exceptions
 import inputremapper.utils
-from inputremapper.logging.logger import logger
+from inputremapper.logging.logger import logger, monitor_debug
 
 MIN_ABS = -(2**15)  # -32768
 MAX_ABS = 2**15  # 32768
@@ -165,6 +165,13 @@ class GlobalUInputs:
         if not uinput.can_emit(event):
             raise inputremapper.exceptions.EventNotHandled(event)
 
+        monitor_debug(
+            "IO_EMIT",
+            'target="%s" device="%s" event=%s',
+            target_uinput,
+            uinput.name,
+            event,
+        )
         logger.write(event, uinput)
         uinput.write(*event)
         uinput.syn()

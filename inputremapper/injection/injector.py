@@ -32,6 +32,7 @@ from multiprocessing.connection import Connection
 from typing import Dict, List, Optional, Tuple, Union
 
 import evdev
+from evdev.ecodes import ABS_HAT0X, ABS_HAT0Y, BTN_DPAD_DOWN, BTN_DPAD_LEFT, BTN_DPAD_RIGHT, BTN_DPAD_UP
 
 from inputremapper.configs.input_config import InputCombination, InputConfig
 from inputremapper.configs.preset import Preset
@@ -45,7 +46,7 @@ from inputremapper.injection.context import Context
 from inputremapper.injection.event_reader import EventReader
 from inputremapper.injection.mapping_handlers.mapping_parser import MappingParser
 from inputremapper.injection.numlock import set_numlock, is_numlock_on, ensure_numlock
-from inputremapper.logging.logger import logger
+from inputremapper.logging.logger import logger, monitor_debug
 from inputremapper.utils import get_device_hash, DeviceHash
 
 CapabilitiesDict = Dict[int, List[int]]
@@ -87,6 +88,21 @@ def get_udev_name(name: str, suffix: str) -> str:
     middle = name[:remaining_len]
     name = f"{DEV_NAME} {middle} {suffix}"
     return name
+
+
+DPAD_ABS_TO_KEY_EQUIVALENTS = {
+    (ABS_HAT0X, -1): BTN_DPAD_LEFT,
+    (ABS_HAT0X, 1): BTN_DPAD_RIGHT,
+    (ABS_HAT0Y, -1): BTN_DPAD_UP,
+    (ABS_HAT0Y, 1): BTN_DPAD_DOWN,
+}
+
+DPAD_KEY_TO_ABS_EQUIVALENTS = {
+    BTN_DPAD_LEFT: (ABS_HAT0X, -1),
+    BTN_DPAD_RIGHT: (ABS_HAT0X, 1),
+    BTN_DPAD_UP: (ABS_HAT0Y, -1),
+    BTN_DPAD_DOWN: (ABS_HAT0Y, 1),
+}
 
 
 @dataclass(frozen=True)
@@ -243,6 +259,62 @@ class Injector(multiprocessing.Process):
         logger.error(f"Could not find input for {input_config}")
         return None
 
+    def _find_equivalent_input_config_fallback(
+        self, input_config: InputConfig
+    ) -> Optional[InputConfig]:
+        """Find a semantically equivalent input on the same device group.
+
+        This is a compatibility fallback for device/driver updates that change
+        how a D-pad is exposed in evdev, e.g. from ABS_HAT0X/Y to BTN_DPAD_*.
+        """
+        equivalents: List[InputConfig] = []
+
+        if (
+            input_config.type == evdev.ecodes.EV_ABS
+            and input_config.analog_threshold in (-1, 1)
+            and (btn_code := DPAD_ABS_TO_KEY_EQUIVALENTS.get(
+                (input_config.code, input_config.analog_threshold)
+            ))
+            is not None
+        ):
+            equivalents.append(
+                InputConfig(
+                    type=evdev.ecodes.EV_KEY,
+                    code=btn_code,
+                    origin_hash=input_config.origin_hash,
+                )
+            )
+
+        if (
+            input_config.type == evdev.ecodes.EV_KEY
+            and (hat_equivalent := DPAD_KEY_TO_ABS_EQUIVALENTS.get(input_config.code))
+            is not None
+        ):
+            hat_code, analog_threshold = hat_equivalent
+            equivalents.append(
+                InputConfig(
+                    type=evdev.ecodes.EV_ABS,
+                    code=hat_code,
+                    analog_threshold=analog_threshold,
+                    origin_hash=input_config.origin_hash,
+                )
+            )
+
+        for equivalent in equivalents:
+            if not (device := self._find_input_device_fallback(equivalent)):
+                continue
+
+            device_hash = get_device_hash(device)
+            logger.info(
+                "Using compatible input fallback %s -> %s on %s",
+                input_config,
+                equivalent,
+                device.path,
+            )
+            return equivalent.modify(origin_hash=device_hash)
+
+        return None
+
     def _grab_devices(self) -> Dict[DeviceHash, evdev.InputDevice]:
         """Grab all InputDevices that match a mappings' origin_hash."""
         # use a dict because the InputDevice is not directly hashable
@@ -281,16 +353,38 @@ class Injector(multiprocessing.Process):
             if self._find_input_device(input_config):
                 continue
 
-            if not (device := self._find_input_device_fallback(input_config)):
-                # fallback failed, this mapping will be ignored
-                continue
-
             for mapping in mappings_by_input[input_config]:
                 combination: List[InputConfig] = list(mapping.input_combination)
-                device_hash = get_device_hash(device)
                 idx = combination.index(input_config)
-                combination[idx] = combination[idx].modify(origin_hash=device_hash)
+                replacement = None
+
+                if device := self._find_input_device_fallback(input_config):
+                    device_hash = get_device_hash(device)
+                    replacement = combination[idx].modify(origin_hash=device_hash)
+                else:
+                    replacement = self._find_equivalent_input_config_fallback(
+                        combination[idx]
+                    )
+
+                if replacement is None:
+                    # fallback failed, this mapping will be ignored
+                    monitor_debug(
+                        "PRESET_FALLBACK",
+                        "missing_input=%s mapping=%s replacement=None",
+                        combination[idx],
+                        mapping,
+                    )
+                    continue
+
+                combination[idx] = replacement
                 mapping.input_combination = combination
+                monitor_debug(
+                    "PRESET_FALLBACK",
+                    "missing_input=%s mapping=%s replacement=%s",
+                    input_config,
+                    mapping,
+                    replacement,
+                )
 
     def _grab_device(self, device: evdev.InputDevice) -> Optional[evdev.InputDevice]:
         """Try to grab the device, return None if not possible.
@@ -425,6 +519,21 @@ class Injector(multiprocessing.Process):
         forward_devices = {}
         for device_hash, device in sources.items():
             forward_devices[device_hash] = self._create_forwarding_device(device)
+
+        monitor_debug(
+            "INJECTOR_SESSION",
+            "group=%s preset=%s mappings=%s sources=%s",
+            self.group.key,
+            self.preset.name,
+            len(list(self.preset)),
+            {
+                device_hash: {
+                    "path": device.path,
+                    "name": device.name,
+                }
+                for device_hash, device in sources.items()
+            },
+        )
 
         # create this within the process after the event loop creation,
         # so that the macros use the correct loop

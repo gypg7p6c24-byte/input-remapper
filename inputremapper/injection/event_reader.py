@@ -32,7 +32,8 @@ from inputremapper.injection.mapping_handlers.mapping_handler import (
     NotifyCallback,
 )
 from inputremapper.input_event import InputEvent
-from inputremapper.logging.logger import logger
+from inputremapper.logging.logger import logger, monitor_debug
+from inputremapper.utils import get_evdev_constant_name
 from inputremapper.utils import get_device_hash, DeviceHash
 
 
@@ -79,6 +80,14 @@ class EventReader:
         """Stop the reader."""
         self.stop_event.set()
 
+    @staticmethod
+    def _describe_event(event: InputEvent) -> str:
+        name = get_evdev_constant_name(event.type, event.code)
+        return (
+            f"{name} type={event.type} code={event.code} value={event.value} "
+            f"origin={event.origin_hash}"
+        )
+
     async def read_loop(self) -> AsyncIterator[evdev.InputEvent]:
         stop_task = asyncio.Task(self.stop_event.wait())
         loop = asyncio.get_running_loop()
@@ -124,8 +133,22 @@ class EventReader:
         notify_callbacks = self.context.get_notify_callbacks(event)
 
         if notify_callbacks:
+            monitor_debug(
+                "IO_INPUT",
+                "source=%s event=%s callbacks=%s",
+                self._source.path,
+                self._describe_event(event),
+                len(notify_callbacks),
+            )
             for notify_callback in notify_callbacks:
                 handled = notify_callback(event, source=self._source) | handled
+            monitor_debug(
+                "IO_RESULT",
+                "source=%s event=%s handled=%s",
+                self._source.path,
+                self._describe_event(event),
+                handled,
+            )
 
         return handled
 
@@ -158,6 +181,13 @@ class EventReader:
     def forward(self, event: InputEvent) -> None:
         """Forward an event, which injects it unmodified."""
         forward_to = self.context.get_forward_uinput(self._device_hash)
+        monitor_debug(
+            "IO_FORWARD",
+            'source=%s target="%s" event=%s',
+            self._source.path,
+            forward_to.name,
+            self._describe_event(event),
+        )
 
         if event.type == evdev.ecodes.EV_KEY:
             logger.write(event, forward_to)
@@ -190,19 +220,30 @@ class EventReader:
             self._source.path,
             self._source.fd,
         )
+        monitor_debug(
+            "IO_SESSION",
+            'reader_start source=%s name="%s" hash=%s',
+            self._source.path,
+            self._source.name,
+            self._device_hash,
+        )
 
         async for event in self.read_loop():
-            try:
-                # Fire and forget, so that handlers and listeners can take their time,
-                # if they want to wait for something special to happen.
-                asyncio.ensure_future(
-                    self.handle(
-                        InputEvent.from_event(event, origin_hash=self._device_hash)
-                    )
+            # Fire and forget, so that handlers and listeners can take their time,
+            # if they want to wait for something special to happen.
+            asyncio.ensure_future(
+                self._handle_safe(
+                    InputEvent.from_event(event, origin_hash=self._device_hash)
                 )
-            except Exception as e:
-                logger.error("Handling event %s failed with %s", event, type(e))
-                traceback.print_exception(e)
+            )
 
         self.context.reset()
         logger.info("read loop for %s stopped", self._source.path)
+
+    async def _handle_safe(self, event: InputEvent) -> None:
+        """Handle one event and keep exceptions contained."""
+        try:
+            await self.handle(event)
+        except Exception as e:
+            logger.error("Handling event %s failed with %s", event, type(e))
+            traceback.print_exception(e)

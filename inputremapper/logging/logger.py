@@ -20,18 +20,141 @@
 """Logging setup for input-remapper."""
 
 import logging
+import os
+import pwd
+import shlex
 import time
+from logging.handlers import RotatingFileHandler
 from typing import cast
 
 from inputremapper.logging.formatter import ColorfulFormatter
 
 from inputremapper.installation_info import VERSION, COMMIT_HASH
+from inputremapper.user import UserUtils
 
 
 start = time.time()
 
 previous_key_debug_log = None
 previous_write_debug_log = None
+
+MONITOR_ENV = "INPUT_REMAPPER_MONITOR"
+MONITOR_PATH_ENV = "INPUT_REMAPPER_MONITOR_PATH"
+MONITOR_DEFAULT_FILENAME = "pilot-monitor.log"
+MONITOR_MAX_BYTES = 20 * 1024 * 1024
+MONITOR_BACKUP_COUNT = 8
+
+
+def _is_truthy(value: str) -> bool:
+    return value.strip().lower() in {"1", "true", "yes", "on"}
+
+
+def monitoring_enabled() -> bool:
+    raw = os.getenv(MONITOR_ENV)
+    if raw is None:
+        # Pilot mode enabled by default; set INPUT_REMAPPER_MONITOR=0 to disable.
+        return True
+    return _is_truthy(raw)
+
+
+def monitor_log_path() -> str:
+    path = os.getenv(MONITOR_PATH_ENV)
+    if path:
+        return os.path.abspath(os.path.expanduser(path))
+
+    xdg_config_home = os.getenv("XDG_CONFIG_HOME", os.path.join(UserUtils.home, ".config"))
+    return os.path.join(
+        xdg_config_home,
+        "input-remapper-2",
+        "logs",
+        MONITOR_DEFAULT_FILENAME,
+    )
+
+
+def monitor_env_prefix() -> str:
+    if not monitoring_enabled():
+        return ""
+
+    path = monitor_log_path()
+    return (
+        "env "
+        f"{MONITOR_ENV}=1 "
+        f"{MONITOR_PATH_ENV}={shlex.quote(path)} "
+    )
+
+
+def monitor_env_vars() -> dict[str, str]:
+    if not monitoring_enabled():
+        return {}
+    return {
+        MONITOR_ENV: "1",
+        MONITOR_PATH_ENV: monitor_log_path(),
+    }
+
+
+def _monitor_log(level: int, tag: str, message: str, *args) -> None:
+    if not monitoring_enabled():
+        return
+    logger.log(level, f"MONITOR_{tag} " + message, *args)
+
+
+def monitor_debug(tag: str, message: str, *args) -> None:
+    _monitor_log(logging.DEBUG, tag, message, *args)
+
+
+def monitor_info(tag: str, message: str, *args) -> None:
+    _monitor_log(logging.INFO, tag, message, *args)
+
+
+def _monitor_owner_ids() -> tuple[int, int] | None:
+    try:
+        passwd = pwd.getpwnam(UserUtils.user)
+    except KeyError:
+        return None
+    return passwd.pw_uid, passwd.pw_gid
+
+
+def _restore_user_ownership(path: str) -> None:
+    owner = _monitor_owner_ids()
+    if owner is None or os.geteuid() != 0:
+        return
+
+    uid, gid = owner
+    if uid == 0:
+        return
+
+    try:
+        os.chown(path, uid, gid)
+    except OSError:
+        pass
+
+
+def _create_monitor_handler(path: str) -> RotatingFileHandler:
+    directory = os.path.dirname(path)
+    os.makedirs(directory, exist_ok=True)
+    _restore_user_ownership(directory)
+
+    handler = RotatingFileHandler(
+        path,
+        maxBytes=MONITOR_MAX_BYTES,
+        backupCount=MONITOR_BACKUP_COUNT,
+        encoding="utf-8",
+    )
+    _restore_user_ownership(path)
+    try:
+        os.chmod(path, 0o600)
+    except OSError:
+        pass
+
+    handler._input_remapper_monitor_handler = True
+    handler.setLevel(logging.DEBUG)
+    handler.setFormatter(
+        logging.Formatter(
+            fmt="%(asctime)s %(process)d %(name)s %(levelname)s %(filename)s:%(lineno)d: %(message)s",
+            datefmt="%Y-%m-%d %H:%M:%S",
+        )
+    )
+    return handler
 
 
 class Logger(logging.Logger):
@@ -121,25 +244,51 @@ class Logger(logging.Logger):
 
     def update_verbosity(self, debug: bool) -> None:
         """Set the logging verbosity according to the settings object."""
-        if debug:
+        is_monitoring = monitoring_enabled()
+        if debug or is_monitoring:
             self.setLevel(logging.DEBUG)
         else:
             self.setLevel(logging.INFO)
 
         for handler in self.handlers:
+            if getattr(handler, "_input_remapper_monitor_handler", False):
+                continue
             handler.setFormatter(ColorfulFormatter(debug))
+            if getattr(handler, "_input_remapper_stream_handler", False):
+                handler.setLevel(logging.DEBUG if debug else logging.INFO)
 
     @classmethod
     def bootstrap_logger(cls):
         # https://github.com/python/typeshed/issues/1801
         logging.setLoggerClass(cls)
         logger = cast(cls, logging.getLogger("input-remapper"))
+        monitor_path = None
 
-        handler = logging.StreamHandler()
-        handler.setFormatter(ColorfulFormatter(False))
-        logger.addHandler(handler)
+        stream_handler = logging.StreamHandler()
+        stream_handler._input_remapper_stream_handler = True
+        stream_handler.setFormatter(ColorfulFormatter(False))
+        stream_handler.setLevel(logging.INFO)
+        logger.addHandler(stream_handler)
+
+        if monitoring_enabled():
+            path = monitor_log_path()
+            monitor_path = path
+            try:
+                monitor_handler = _create_monitor_handler(path)
+            except OSError as error:
+                monitor_path = None
+                logger.warning(
+                    'Pilot monitoring disabled for "%s": %s',
+                    path,
+                    error,
+                )
+            else:
+                logger.addHandler(monitor_handler)
+
         logger.setLevel(logging.INFO)
         logging.getLogger("asyncio").setLevel(logging.WARNING)
+        if monitor_path:
+            logger.info('Pilot monitoring enabled, writing to "%s"', monitor_path)
         return logger
 
 

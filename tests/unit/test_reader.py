@@ -936,6 +936,14 @@ class TestReaderMultiprocessing(unittest.TestCase):
                     "pkexec input-remapper-control --command start-reader-service -d"
                 )
 
+    def test_starts_the_service_non_interactive(self):
+        with patch.object(os, "system", MagicMock(return_value=0)) as os_system_mock:
+            ReaderService.pkexec_reader_service(allow_user_interaction=False)
+            os_system_mock.assert_called_once_with(
+                "pkexec --disable-internal-agent "
+                "input-remapper-control --command start-reader-service -d"
+            )
+
     def test_wont_start_the_service(self):
         # already running, no call to os.system
         with patch.object(ReaderService, "is_running", lambda: True):

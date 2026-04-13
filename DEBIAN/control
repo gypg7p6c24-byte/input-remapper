@@ -1,8 +1,15 @@
 Package: input-remapper
 Version: 2.2.0
 Architecture: all
+Section: utils
+Priority: optional
 Maintainer: Sezanzeb <b8x45ygc9@mozmail.com>
-Depends: build-essential, libpython3-dev, libdbus-1-dev, python3, python3-evdev, python3-dasbus, python3-gi, gettext, python3-cairo, libgtk-3-0, libgtksourceview-4-dev, python3-pydantic, python3-packaging, python3-psutil, gir1.2-appindicator3-0.1
-Description: A tool to change the mapping of your input device buttons
+Homepage: https://github.com/gypg7p6c24-byte/input-remapper
+Depends: python3, python3-evdev, python3-dasbus, python3-gi, python3-cairo, python3-pydantic, python3-packaging, python3-psutil, pkexec, polkitd, libgtk-3-0, gir1.2-gtk-3.0, gir1.2-gtksource-4
+Recommends: gir1.2-appindicator3-0.1
+Description: Remap Linux input devices, shortcuts, and macros
+ Input Remapper provides a GTK interface to remap keyboards, mice,
+ gamepads, and keypads on Linux. It supports autoloaded per-game presets,
+ macros, and device-specific remapping through evdev/uinput.
 Replaces: python3-key-mapper, key-mapper, input-remapper-gtk, input-remapper-daemon, python3-inputremapper
 Conflicts: python3-key-mapper, key-mapper, input-remapper-gtk, input-remapper-daemon, python3-inputremapper

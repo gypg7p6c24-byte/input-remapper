@@ -59,8 +59,8 @@ from inputremapper.gui.messages.message_data import (
     PresetData,
     CombinationUpdate,
 )
-from inputremapper.gui.utils import HandlerDisabled, Colors
-from inputremapper.logging.logger import logger
+from inputremapper.gui.utils import HandlerDisabled, Colors, debounce
+from inputremapper.logging.logger import logger, monitor_debug
 from inputremapper.injection.mapping_handlers.axis_transform import Transformation
 from inputremapper.input_event import InputEvent
 from inputremapper.utils import (
@@ -531,7 +531,16 @@ class CodeEditor:
         if self._shows_placeholder():
             return
 
-        self._controller.update_mapping(output_symbol=self.code)
+        # Keep the live preview responsive but avoid persisting invalid
+        # intermediate values while the user is still typing.
+        self._controller.update_mapping(output_symbol=self.code, persist=False)
+        self._persist_if_valid()
+
+    @debounce(350)
+    def _persist_if_valid(self):
+        active_mapping = self._controller.data_manager.active_mapping
+        if active_mapping and active_mapping.get_error() is None:
+            self._controller.save()
 
     def _on_mapping_loaded(self, mapping: MappingData):
         code = SET_KEY_FIRST
@@ -758,11 +767,14 @@ class SteamProcessWatcher:
         self._name_by_appid = {}
         self._shortcut_tokens: Dict[str, Set[str]] = {}
         self._shortcut_requires_flatpak: Dict[str, bool] = {}
+        self._shortcut_expected_exe: Dict[str, str] = {}
         for appid, name, path in self._games:
             self._paths.append((os.path.normpath(path), appid, name))
             self._name_by_appid[appid] = name
         for appid, name, exe, startdir, launch_options in self._shortcuts:
             self._name_by_appid.setdefault(appid, name)
+            normalized_exe = self._normalize_shortcut_token(exe).lower()
+            self._shortcut_expected_exe[appid] = os.path.basename(normalized_exe)
             tokens = self._build_shortcut_tokens(exe, startdir, launch_options)
             if tokens:
                 self._shortcut_tokens[appid] = tokens
@@ -817,6 +829,13 @@ class SteamProcessWatcher:
                 current_appids,
                 self._summarize_hits(hits, current_appids),
             )
+            monitor_debug(
+                "WATCHER",
+                "tick=%s active_appids=%s hits=%s",
+                self._ticks,
+                current_appids,
+                self._summarize_all_hits(hits),
+            )
             if self._on_change:
                 try:
                     self._on_change(current_appids)
@@ -844,6 +863,24 @@ class SteamProcessWatcher:
                     "source": source,
                     "pid": hit.get("pid"),
                     "exe": exe,
+                }
+            )
+        return summaries
+
+    def _summarize_all_hits(self, hits: List[dict]) -> List[dict]:
+        summaries = []
+        for hit in hits:
+            matches = hit.get("matches") or []
+            if not matches:
+                continue
+            summaries.append(
+                {
+                    "pid": hit.get("pid"),
+                    "exe": os.path.basename(hit.get("exe") or ""),
+                    "cwd": hit.get("cwd") or "",
+                    "matches": matches,
+                    "appid": hit.get("appid"),
+                    "name": hit.get("name", ""),
                 }
             )
         return summaries
@@ -1093,11 +1130,15 @@ class SteamProcessWatcher:
         if not self._shortcut_tokens:
             return ""
         flatpak_id = env.get("FLATPAK_ID", "") if env else ""
-        haystack = " ".join([exe or "", cwd or "", cmd_text or "", flatpak_id]).lower()
+        # Use exe/cmdline/env only. CWD is too broad and caused false positives
+        # (e.g. editors opened in a game folder).
+        haystack = " ".join([exe or "", cmd_text or "", flatpak_id]).lower()
         if not haystack.strip():
             return ""
         exe_base = os.path.basename(exe or "").lower()
         for appid, tokens in self._shortcut_tokens.items():
+            if not self._shortcut_exe_matches(appid, exe_base):
+                continue
             if self._shortcut_requires_flatpak.get(appid):
                 # Prefer matching the actual app process (with FLATPAK_ID), not wrapper.
                 if exe_base in ("bwrap", "flatpak"):
@@ -1115,6 +1156,25 @@ class SteamProcessWatcher:
                 if token and token in haystack:
                     return appid
         return ""
+
+    def _shortcut_exe_matches(self, appid: str, exe_base: str) -> bool:
+        if not exe_base:
+            return True
+
+        expected = self._shortcut_expected_exe.get(appid, "")
+        if not expected:
+            return True
+
+        wrappers = {"bash", "sh", "dash", "env", "flatpak", "bwrap"}
+        if expected.endswith(".sh"):
+            # Script-based shortcuts should be matched by shell wrappers only.
+            return exe_base in wrappers or exe_base == expected
+
+        # Wrapper exes are too generic to enforce strictly.
+        if exe_base in wrappers or expected in wrappers:
+            return True
+
+        return exe_base == expected
 
     def _flatpak_active(self, haystack: str, env: dict) -> bool:
         if "flatpak" in haystack or "bwrap" in haystack:

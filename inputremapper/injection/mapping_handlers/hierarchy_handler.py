@@ -53,6 +53,7 @@ class HierarchyHandler(MappingHandler):
         # use the mapping from the first child TODO: find a better solution
         mapping = handlers[0].mapping
         super().__init__(combination, mapping, global_uinputs)
+        self._configure_abs_to_btn_passthrough()
 
     def __str__(self):
         return f"HierarchyHandler for {self._input_config}"
@@ -63,6 +64,29 @@ class HierarchyHandler(MappingHandler):
     @property
     def child(self):  # used for logging
         return self.handlers
+
+    def _configure_abs_to_btn_passthrough(self) -> None:
+        """Enable inactive passthrough when both axis directions are mapped.
+
+        Without this, one inactive ABS->BTN handler can consume an event and prevent
+        the opposite-direction handler from activating during a fast direction switch.
+        """
+        signs = set()
+        for handler in self.handlers:
+            analog = handler.mapping.input_combination.find_analog_input_config(
+                type_=EV_ABS
+            )
+            if not analog or analog.analog_threshold is None:
+                continue
+            signs.add(1 if analog.analog_threshold > 0 else -1)
+
+        if len(signs) <= 1:
+            return
+
+        for handler in self.handlers:
+            configure = getattr(handler, "set_inactive_passthrough", None)
+            if callable(configure):
+                configure(True)
 
     def notify(
         self,

@@ -32,6 +32,17 @@ Branch policy for this fork:
 
 <br/>
 
+## Fork Status
+
+This repository is a modified **fork** of the official Input Remapper project.
+It is **not an official release** and is currently under active development.
+
+Official project (upstream):
+- https://github.com/sezanzeb/input-remapper
+- https://github.com/sezanzeb/input-remapper/releases
+
+<br/>
+
 ## Installation
 
 ### Ubuntu/Debian

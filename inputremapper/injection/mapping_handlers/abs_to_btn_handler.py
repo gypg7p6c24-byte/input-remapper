@@ -30,6 +30,7 @@ from inputremapper.injection.mapping_handlers.mapping_handler import (
     InputEventHandler,
 )
 from inputremapper.input_event import InputEvent, EventActions
+from inputremapper.logging.logger import monitor_debug
 from inputremapper.utils import get_evdev_constant_name
 
 
@@ -39,6 +40,7 @@ class AbsToBtnHandler(MappingHandler):
     _input_config: InputConfig
     _active: bool
     _sub_handler: InputEventHandler
+    _allow_inactive_passthrough: bool
 
     def __init__(
         self,
@@ -50,6 +52,7 @@ class AbsToBtnHandler(MappingHandler):
         super().__init__(combination, mapping, global_uinputs)
 
         self._active = False
+        self._allow_inactive_passthrough = False
         self._input_config = combination[0]
         assert self._input_config.analog_threshold
         assert len(combination) == 1
@@ -64,6 +67,10 @@ class AbsToBtnHandler(MappingHandler):
     @property
     def child(self):  # used for logging
         return self._sub_handler
+
+    def set_inactive_passthrough(self, enabled: bool) -> None:
+        """Allow inactive events below threshold to bubble to sibling handlers."""
+        self._allow_inactive_passthrough = enabled
 
     def _trigger_point(self, abs_min: int, abs_max: int) -> Tuple[float, float]:
         """Calculate the axis mid and trigger point."""
@@ -101,13 +108,14 @@ class AbsToBtnHandler(MappingHandler):
             absinfo[event.code].min, absinfo[event.code].max
         )
         value = event.value
+        active_before = self._active
         if (value < threshold > mid_point) or (value > threshold < mid_point):
             if self._active:
                 event = event.modify(value=0, actions=(EventActions.as_key,))
             else:
-                # consume the event.
-                # We could return False to forward events
-                return True
+                # Keep legacy behavior (consume) unless the hierarchy explicitly
+                # enables passthrough to evaluate opposite-direction siblings.
+                return not self._allow_inactive_passthrough
         else:
             if value >= threshold > mid_point:
                 direction = EventActions.positive_trigger
@@ -116,6 +124,19 @@ class AbsToBtnHandler(MappingHandler):
             event = event.modify(value=1, actions=(EventActions.as_key, direction))
 
         self._active = bool(event.value)
+        monitor_debug(
+            "AXIS_BTN",
+            "source=%s raw_event=%s mapped_event=%s threshold=%s midpoint=%s active_before=%s active_after=%s passthrough=%s suppress=%s",
+            source.path,
+            value,
+            event.event_tuple,
+            threshold,
+            mid_point,
+            active_before,
+            self._active,
+            self._allow_inactive_passthrough,
+            suppress,
+        )
         # logger.debug(event.event_tuple, "sending to sub_handler")
         return self._sub_handler.notify(
             event,

@@ -4,7 +4,7 @@
   <id>io.github.sezanzeb.input_remapper</id>
   
   <name>Input Remapper</name>
-  <summary>An easy to use tool to change the mapping of your input device buttons</summary>
+  <summary>Remap Linux input devices, shortcuts, and macros</summary>
   
   <metadata_license>CC0-1.0</metadata_license>
   <project_license>GPL-3.0-or-later</project_license>
@@ -17,7 +17,10 @@
   
   <description>
     <p>
-      An easy to use tool to change the mapping of your input device buttons. Supports mice, keyboards, gamepads, X11, Wayland, combined buttons and programmable macros. Allows mapping non-keyboard events (click, joystick, wheel) to keys of keyboard devices.
+      Input Remapper remaps keyboards, mice, gamepads, and keypads on Linux.
+      It supports X11 and Wayland, per-game presets, programmable macros,
+      combined buttons, and non-keyboard inputs such as clicks, joysticks,
+      and wheels.
     </p>
   </description>
   
@@ -33,11 +36,13 @@
     </screenshot>
   </screenshots>
   
-  <url type="homepage">https://github.com/sezanzeb/input-remapper</url>
+  <url type="homepage">https://github.com/gypg7p6c24-byte/input-remapper</url>
+  <url type="bugtracker">https://github.com/gypg7p6c24-byte/input-remapper/issues</url>
   
   <content_rating type="oars-1.1" />
   
   <releases>
+    <release version="2.2.0" date="2026-04-13" />
     <release version="1.5.0" date="2022-06-22" />
   </releases>
   

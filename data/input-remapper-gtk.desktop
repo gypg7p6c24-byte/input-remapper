@@ -5,4 +5,4 @@ Icon=input-remapper
 Exec=input-remapper-gtk
 Terminal=false
 Categories=Settings
-Comment=GUI for device specific key mappings
+Comment=Remap Linux input devices, shortcuts, and macros

@@ -39,6 +39,10 @@ from evdev.ecodes import (
     KEY_A,
     REL_HWHEEL,
     BTN_A,
+    BTN_DPAD_LEFT,
+    BTN_DPAD_RIGHT,
+    BTN_DPAD_UP,
+    BTN_DPAD_DOWN,
     ABS_X,
     ABS_VOLUME,
 )
@@ -206,6 +210,54 @@ class TestInjector(unittest.IsolatedAsyncioTestCase):
         grabbed = self.injector._grab_devices()
         self.assertEqual(len(grabbed), 1)
         self.assertEqual(grabbed[device_hash].path, "/dev/input/event30")
+
+    def test_update_preset_uses_dpad_key_equivalent_fallback(self):
+        fixtures["/dev/input/event200"] = {
+            "capabilities": {
+                EV_KEY: [
+                    BTN_DPAD_LEFT,
+                    BTN_DPAD_RIGHT,
+                    BTN_DPAD_UP,
+                    BTN_DPAD_DOWN,
+                ]
+            },
+            "phys": "usb-0000:03:00.0-9/input1",
+            "info": fixtures.foo_device_2_gamepad.info,
+            "name": "Foo DPad Compatibility Device",
+        }
+        replacement_device = evdev.InputDevice("/dev/input/event200")
+
+        preset = Preset()
+        preset.add(
+            Mapping.from_combination(
+                InputCombination(
+                    [
+                        InputConfig(
+                            type=EV_ABS,
+                            code=ABS_HAT0X,
+                            analog_threshold=-1,
+                            origin_hash=fixtures.foo_device_2_gamepad.get_device_hash(),
+                        )
+                    ]
+                ),
+                "keyboard",
+                "a",
+            ),
+        )
+
+        self.injector = Injector(
+            groups.find(key="Foo Device 2"),
+            preset,
+            self.mapping_parser,
+        )
+        self.injector._devices = [replacement_device]
+        self.injector._update_preset()
+
+        updated = next(iter(self.injector.preset)).input_combination[0]
+        self.assertEqual(updated.type, EV_KEY)
+        self.assertEqual(updated.code, BTN_DPAD_LEFT)
+        self.assertIsNone(updated.analog_threshold)
+        self.assertEqual(updated.origin_hash, fixtures["/dev/input/event200"].get_device_hash())
 
     def test_forward_gamepad_events(self):
         device_hash = fixtures.gamepad.get_device_hash()

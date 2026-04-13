@@ -65,7 +65,7 @@ from inputremapper.injection.mapping_handlers.mapping_handler import (
 from inputremapper.injection.mapping_handlers.rel_to_btn_handler import RelToBtnHandler
 from inputremapper.input_event import InputEvent, EventActions
 from inputremapper.ipc.pipe import Pipe
-from inputremapper.logging.logger import logger
+from inputremapper.logging.logger import logger, monitor_env_prefix
 from inputremapper.user import UserUtils
 from inputremapper.utils import get_device_hash
 
@@ -147,10 +147,20 @@ class ReaderService:
         return True
 
     @staticmethod
-    def pkexec_reader_service():
-        """Start reader-service via pkexec to run in the background."""
+    def pkexec_reader_service(allow_user_interaction: bool = True):
+        """Start reader-service via pkexec to run in the background.
+
+        Args:
+            allow_user_interaction: If False, pkexec will not open an auth prompt.
+        """
         debug = " -d" if logger.level <= logging.DEBUG else ""
-        cmd = f"pkexec input-remapper-control --command start-reader-service{debug}"
+        pkexec = "pkexec"
+        if not allow_user_interaction:
+            pkexec += " --disable-internal-agent"
+        cmd = (
+            f"{monitor_env_prefix()}"
+            f"{pkexec} input-remapper-control --command start-reader-service{debug}"
+        )
 
         logger.debug("Running `%s`", cmd)
         exit_code = os.system(cmd)

@@ -22,6 +22,7 @@
 import argparse
 import logging
 import os
+import shutil
 import subprocess
 import sys
 from enum import Enum
@@ -53,6 +54,7 @@ class Internals(Enum):
     START_DAEMON = "start-daemon"
     START_READER_SERVICE = "start-reader-service"
     SET_POLKIT = "set-polkit"
+    UNINSTALL = "uninstall"
 
 
 class Options:
@@ -65,6 +67,7 @@ class Options:
     debug: bool
     version: str
     polkit: Optional[str]
+    remove_config: bool
 
 
 class InputRemapperControlBin:
@@ -112,7 +115,10 @@ class InputRemapperControlBin:
         if options.command is not None:
             if options.command in [command.value for command in Internals]:
                 input_remapper_control.internals(
-                    options.command, options.debug, options.polkit
+                    options.command,
+                    options.debug,
+                    options.polkit,
+                    options.remove_config,
                 )
             elif options.command in [command.value for command in Commands]:
                 from inputremapper.daemon import Daemon
@@ -277,7 +283,13 @@ class InputRemapperControlBin:
             logger.info("Asking daemon to autoload for %s", device)
             self.daemon.autoload_single(group.key, timeout=2000)
 
-    def internals(self, command: str, debug: True, polkit: Optional[str]) -> None:
+    def internals(
+        self,
+        command: str,
+        debug: bool,
+        polkit: Optional[str] = None,
+        remove_config: bool = False,
+    ) -> None:
         """Methods that are needed to get the gui to work and that require root.
 
         input-remapper-control should be started with sudo or pkexec for this.
@@ -285,7 +297,6 @@ class InputRemapperControlBin:
         debug = " -d" if debug else ""
 
         if command == Internals.START_READER_SERVICE.value:
-            self._ensure_polkit_rule_for_user()
             cmd = f"input-remapper-reader-service{debug}"
         elif command == Internals.START_DAEMON.value:
             cmd = f"input-remapper-service --hide-info{debug}"
@@ -295,6 +306,9 @@ class InputRemapperControlBin:
                 sys.exit(2)
             self._set_polkit_rule(enable=(polkit == "enable"))
             return
+        elif command == Internals.UNINSTALL.value:
+            self._uninstall(remove_config=remove_config)
+            return
         else:
             return
 
@@ -302,6 +316,104 @@ class InputRemapperControlBin:
         cmd = f"{cmd} &"
         logger.debug(f"Running `{cmd}`")
         os.system(cmd)
+
+    def _run_optional_command(self, *cmd: str) -> int:
+        logger.debug("Running `%s`", " ".join(cmd))
+        try:
+            return subprocess.call(
+                list(cmd),
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+        except FileNotFoundError:
+            logger.debug("Command not found: %s", cmd[0])
+            return 127
+
+    def _remove_path(self, path: str) -> None:
+        try:
+            if os.path.isdir(path):
+                shutil.rmtree(path)
+            else:
+                os.remove(path)
+            logger.info("Removed %s", path)
+        except FileNotFoundError:
+            logger.debug("Path already absent: %s", path)
+        except OSError as exc:
+            logger.warning("Failed to remove %s: %s", path, exc)
+
+    def _uninstall(self, remove_config: bool) -> None:
+        logger.info("Uninstall requested remove_config=%s", remove_config)
+
+        # stop/disable potential service units first
+        for unit in ("input-remapper.service", "inputremapper-daemon.service"):
+            self._run_optional_command("systemctl", "disable", "--now", unit)
+
+        # remove only the current user's rule
+        self._remove_path(self._polkit_rule_path(UserUtils.user))
+
+        # remove desktop autostart entries
+        user_autostart = os.path.join(
+            UserUtils.home,
+            ".config",
+            "autostart",
+            "input-remapper-gtk-autostart.desktop",
+        )
+        self._remove_path(user_autostart)
+        self._remove_path("/etc/xdg/autostart/input-remapper-gtk-autostart.desktop")
+
+        package_candidates = [
+            "input-remapper",
+            "input-remapper-daemon",
+            "inputremapper-daemon",
+        ]
+        installed_packages = []
+        for package in package_candidates:
+            if (
+                subprocess.call(
+                    ["dpkg-query", "-W", "-f=${db:Status-Status}", package],
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                )
+                == 0
+            ):
+                installed_packages.append(package)
+
+        if installed_packages:
+            if shutil.which("apt-get"):
+                code = self._run_optional_command(
+                    "apt-get",
+                    "-y",
+                    "purge",
+                    *installed_packages,
+                )
+                if code != 0:
+                    fallback_code = self._run_optional_command(
+                        "dpkg", "--purge", *installed_packages
+                    )
+                    if fallback_code == 0:
+                        logger.info(
+                            "apt-get purge failed with code %s, dpkg fallback succeeded",
+                            code,
+                        )
+                    else:
+                        logger.warning(
+                            "apt-get purge failed with code %s and dpkg fallback failed with code %s",
+                            code,
+                            fallback_code,
+                        )
+            else:
+                self._run_optional_command("dpkg", "--purge", *installed_packages)
+        else:
+            logger.info("No installed input-remapper packages found via dpkg")
+
+        if remove_config:
+            config_dir = os.path.join(UserUtils.home, ".config", "input-remapper-2")
+            self._remove_path(config_dir)
+        else:
+            logger.info(
+                "Keeping presets/config at %s",
+                os.path.join(UserUtils.home, ".config", "input-remapper-2"),
+            )
 
     def _polkit_rule_path(self, user: str) -> str:
         filename = f"90-input-remapper-{user}.rules"
@@ -473,6 +585,13 @@ class InputRemapperControlBin:
             choices=["enable", "disable"],
             default=None,
             metavar="STATE",
+        )
+        parser.add_argument(
+            "--remove-config",
+            action="store_true",
+            dest="remove_config",
+            help="Used with --command uninstall: also remove presets/config files",
+            default=False,
         )
 
         return parser.parse_args(sys.argv[1:])  # type: ignore

@@ -33,7 +33,7 @@ from inputremapper.injection.mapping_handlers.mapping_handler import (
     HandlerEnums,
 )
 from inputremapper.input_event import InputEvent
-from inputremapper.logging.logger import logger
+from inputremapper.logging.logger import logger, monitor_debug
 
 if TYPE_CHECKING:
     from inputremapper.injection.context import Context
@@ -105,13 +105,29 @@ class CombinationHandler(MappingHandler):
             # we are not responsible for the event
             return False
 
+        state_before = dict(self._pressed_keys)
+        output_before = self._output_previously_active
         # update the state
         # The value of non-key input should have been changed to either 0 or 1 at this
         # point by other handlers.
         is_pressed = event.value == 1
         self._pressed_keys[event.input_match_hash] = is_pressed
         # maybe this changes the activation status (triggered/not-triggered)
-        changed = self._is_activated() != self._output_previously_active
+        activated = self._is_activated()
+        changed = activated != self._output_previously_active
+        monitor_debug(
+            "COMBO",
+            "source=%s event=%s mapping=%s pressed_before=%s pressed_after=%s output_before=%s activated=%s changed=%s suppress=%s",
+            source.path,
+            event.event_tuple,
+            self.mapping.input_combination,
+            state_before,
+            self._pressed_keys,
+            output_before,
+            activated,
+            changed,
+            suppress,
+        )
 
         if changed:
             if is_pressed:

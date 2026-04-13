@@ -53,6 +53,34 @@ from inputremapper.injection.injector import (
 from inputremapper.logging.logger import logger
 
 DEFAULT_PRESET_NAME = _("new preset")
+LEGACY_OUTPUT_SYMBOL_ALIASES = {
+    ",": "comma",
+    ".": "period",
+    ";": "semicolon",
+    ":": "colon",
+    "/": "slash",
+    "\\": "backslash",
+    "'": "apostrophe",
+    '"': "quotedbl",
+    "`": "grave",
+    "-": "minus",
+    "_": "underscore",
+    "=": "equal",
+    "+": "plus",
+    "[": "bracketleft",
+    "]": "bracketright",
+    "{": "braceleft",
+    "}": "braceright",
+    "(": "parenleft",
+    ")": "parenright",
+    "%": "percent",
+    "&": "ampersand",
+    "*": "asterisk",
+    "!": "exclam",
+    "?": "question",
+    "@": "at",
+    " ": "space",
+}
 
 # useful type aliases
 Name = str
@@ -374,10 +402,38 @@ class DataManager:
         preset_path = PathUtils.get_preset_path(self.active_group.name, name)
         preset = Preset(preset_path, mapping_factory=UIMapping)
         preset.load()
+        self._normalize_loaded_output_symbols(preset)
         self._active_input_config = None
         self._active_mapping = None
         self._active_preset = preset
         self.publish_preset()
+
+    def _normalize_loaded_output_symbols(self, preset: Preset[UIMapping]) -> None:
+        changed = False
+        for mapping in preset:
+            symbol = mapping.output_symbol
+            if not symbol:
+                continue
+
+            if self._keyboard_layout.get(symbol) is not None:
+                continue
+
+            alias = LEGACY_OUTPUT_SYMBOL_ALIASES.get(symbol)
+            if alias and self._keyboard_layout.get(alias) is not None:
+                logger.info(
+                    "Normalizing legacy output symbol %r -> %r in %s",
+                    symbol,
+                    alias,
+                    preset.path,
+                )
+                mapping.output_symbol = alias
+                changed = True
+
+        if changed:
+            logger.info(
+                "Applied legacy output symbol normalization in memory for %s",
+                preset.path,
+            )
 
     def load_mapping(self, combination: InputCombination):
         """Load a mapping. Will send "mapping" message on the MessageBroker."""

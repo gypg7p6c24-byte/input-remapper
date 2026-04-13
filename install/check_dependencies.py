@@ -35,7 +35,26 @@ def check_dependencies() -> None:
         import dasbus
         import pygobject
         import pydantic
+
+        tray_backend = None
+        for namespace in ("AyatanaAppIndicator3", "AppIndicator3"):
+            try:
+                gi.require_version(namespace, "0.1")
+                repository = __import__("gi.repository", fromlist=[namespace])
+                getattr(repository, namespace)
+                tray_backend = namespace
+                break
+            except (ImportError, ValueError):
+                continue
+
         print("All required Python modules found")
+        if tray_backend is not None:
+            print(f"Tray indicator typelib found: {tray_backend}")
+        else:
+            print(
+                "\033[93mNo AppIndicator typelib found, "
+                "falling back to Gtk.StatusIcon\033[0m"
+            )
     except ImportError as e:
         print(f"\033[93mMissing Python module: {e}\033[0m")
     except Exception as e:

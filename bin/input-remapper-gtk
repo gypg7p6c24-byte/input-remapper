@@ -20,7 +20,64 @@
 
 """Starts the user interface."""
 
-from inputremapper.bin.input_remapper_gtk import InputRemapperGtkBin
+import os
+import subprocess
+import traceback
+from pathlib import Path
+
+
+def _startup_failure_log_path() -> Path:
+    config_home = os.environ.get("XDG_CONFIG_HOME")
+    if config_home:
+        base = Path(config_home).expanduser()
+    else:
+        base = Path.home() / ".config"
+    return base / "input-remapper-2" / "logs" / "startup-failure.log"
+
+
+def _write_failure_log(error: BaseException) -> Path:
+    path = _startup_failure_log_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("w", encoding="utf-8") as handle:
+        handle.write(traceback.format_exc())
+        handle.write("\n")
+        handle.write(f"{type(error).__name__}: {error}\n")
+    try:
+        os.chmod(path, 0o600)
+    except OSError:
+        pass
+    return path
+
+
+def _notify_startup_failure(log_path: Path) -> None:
+    message = (
+        "Input Remapper failed to start.\n\n"
+        f"See:\n{log_path}"
+    )
+    for command in (
+        ["zenity", "--error", "--width=420", "--text", message],
+        ["notify-send", "Input Remapper failed to start", str(log_path)],
+        ["xmessage", "-center", message],
+    ):
+        try:
+            completed = subprocess.run(
+                command,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                check=False,
+            )
+            if completed.returncode == 0:
+                return
+        except FileNotFoundError:
+            continue
+
 
 if __name__ == "__main__":
-    InputRemapperGtkBin.main()
+    try:
+        from inputremapper.bin.input_remapper_gtk import InputRemapperGtkBin
+
+        InputRemapperGtkBin.main()
+    except BaseException as error:
+        log_path = _write_failure_log(error)
+        _notify_startup_failure(log_path)
+        raise

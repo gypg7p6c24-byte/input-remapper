@@ -46,7 +46,7 @@ from inputremapper.injection.global_uinputs import GlobalUInputs
 from inputremapper.injection.injector import Injector, InjectorState
 from inputremapper.injection.macros.macro import macro_variables
 from inputremapper.injection.mapping_handlers.mapping_parser import MappingParser
-from inputremapper.logging.logger import logger
+from inputremapper.logging.logger import logger, monitor_env_prefix
 from inputremapper.user import UserUtils
 
 gi.require_version("GLib", "2.0")
@@ -61,6 +61,8 @@ DAEMON = DBusServiceIdentifier(
 
 # timeout in milliseconds
 BUS_TIMEOUT = 10000
+BUS_CONNECT_RETRIES = 20
+BUS_CONNECT_RETRY_DELAY = 0.25
 
 
 class AutoloadHistory:
@@ -241,7 +243,10 @@ class Daemon:
             # Runs via input-remapper-control so that auth_admin_keep works
             # for all pkexec calls of the gui
             debug = " -d" if logger.is_debug() else ""
-            cmd = f"pkexec input-remapper-control --command start-daemon {debug}"
+            cmd = (
+                f"{monitor_env_prefix()}"
+                f"pkexec input-remapper-control --command start-daemon {debug}"
+            )
 
             # using pkexec will also cause the service to continue running in
             # the background after the gui has been closed, which will keep
@@ -249,10 +254,10 @@ class Daemon:
 
             logger.debug("Running `%s`", cmd)
             os.system(cmd)
-            time.sleep(0.2)
+            time.sleep(BUS_CONNECT_RETRY_DELAY)
 
             # try a few times if the service was just started
-            for attempt in range(3):
+            for attempt in range(BUS_CONNECT_RETRIES):
                 try:
                     proxy = DAEMON.get_proxy()
                     proxy.Introspect(timeout=BUS_TIMEOUT)
@@ -260,9 +265,12 @@ class Daemon:
                 except DBusError as error:
                     logger.debug("Attempt %d to reach the service failed:", attempt + 1)
                     logger.debug('"%s"', error)
-                time.sleep(0.2)
+                time.sleep(BUS_CONNECT_RETRY_DELAY)
             else:
-                logger.error("Failed to connect to the service")
+                logger.error(
+                    "Failed to connect to the service after %d attempts",
+                    BUS_CONNECT_RETRIES,
+                )
                 sys.exit(8)
 
         if UserUtils.user != "root":
