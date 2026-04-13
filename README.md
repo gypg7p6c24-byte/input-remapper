@@ -22,7 +22,8 @@ This fork is not an official upstream release. It is actively developed and vali
 Branch policy for this fork:
 - `main`: stable branch used as production baseline.
 - `dev`: integration branch for ongoing changes and tests.
-
+- Current validation target: Ubuntu.
+- Debian and other distro feedback is welcome, but this fork is not documented as validated there yet.
 
 <p align="center">
   <img src="readme/screenshot.png" width="48%"/>
@@ -32,93 +33,33 @@ Branch policy for this fork:
 
 <br/>
 
-## Fork Status
+## Fork Additions
 
-This repository is a modified **fork** of the official Input Remapper project.
-It is **not an official release** and is currently under active development.
-
-Official project (upstream):
-- https://github.com/sezanzeb/input-remapper
-- https://github.com/sezanzeb/input-remapper/releases
+- Ubuntu-first packaging and install flow validated with App Center.
+- Clean uninstall flow from the application, with presets kept by default.
+- Autostart toggle with privilege prompt.
+- Auto-hide support with tray icon behavior validated in normal use.
+- Stable `main` branch and separate `dev` integration branch.
 
 <br/>
 
 ## Installation
 
-### Ubuntu/Debian
+### Ubuntu
 
-Either download an installable .deb file from the [latest release](https://github.com/sezanzeb/input-remapper/releases):
+1. Open the [stable release page](https://github.com/gypg7p6c24-byte/input-remapper/releases/tag/stable-latest).
+2. Download the `.deb` asset attached to that release.
+   Current stable file: `input-remapper-2.2.0.deb`
+3. Double-click the downloaded file.
+4. App Center opens.
+5. Click `Install`.
+6. Enter your password when asked.
+7. Launch `Input Remapper` from the applications list.
 
-```sh
-wget https://github.com/sezanzeb/input-remapper/releases/download/2.2.0/input-remapper-2.2.0.deb
-sudo apt install -f ./input-remapper-2.2.0.deb
-```
+This is the supported install flow for this fork.
 
-Or install the very latest changes via:
+### Notes
 
-```sh
-sudo apt install git gettext
-git clone https://github.com/sezanzeb/input-remapper.git
-cd input-remapper
-./scripts/build-deb.sh
-sudo apt purge input-remapper input-remapper-daemon input-remapper-gtk python3-inputremapper
-sudo apt install -f ./dist/input-remapper-2.2.0.deb
-```
-
-Input Remapper is also available in the repositories of [Debian](https://tracker.debian.org/pkg/input-remapper)
-and [Ubuntu](https://packages.ubuntu.com/oracular/input-remapper) via
-
-```sh
-sudo apt install input-remapper
-```
-
-Input Remapper ≥ 2.0 requires at least Ubuntu 22.04.
-
-<br/>
-
-### Fedora
-
-```sh
-sudo dnf install input-remapper
-sudo systemctl enable --now input-remapper
-```
-
-<br/>
-
-### Arch
-
-```sh
-yay -S input-remapper-git
-sudo systemctl enable --now input-remapper
-```
-
-<br/>
-
-### Other Distros
-
-Figure out the packages providing those dependencies in your distro, and install them:
-`python3-evdev` ≥1.3.0, `gtksourceview4`, `python3-devel`, `python3-pydantic`,
-`python3-dasbus`, `python3-psutil`
-
-You can also use pip to install some of them. Python packages need to be installed
-globally for the service to be able to import them. Don't use `--user`. Conda and such
-may also cause problems due to changed python paths and versions.
-
-```sh
-sudo pip install evdev pydantic dasbus PyGObject
-```
-
-```sh
-git clone https://github.com/sezanzeb/input-remapper.git
-cd input-remapper
-sudo python3 -m install --root /
-sudo systemctl enable --now input-remapper
-```
-
-For all other options and help, check `python3 -m install --help`
-
-To uninstall:
-
-```sh
-sudo python3 -m install.uninstall
-```
+- The current documented target is Ubuntu.
+- Debian and other distributions are not yet documented as validated in this fork.
+- GitHub Issues are currently disabled on this fork.
