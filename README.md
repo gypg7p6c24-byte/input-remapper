@@ -39,7 +39,6 @@ Branch policy for this fork:
 - Clean uninstall flow from the application, with presets kept by default.
 - Autostart toggle with privilege prompt.
 - Auto-hide support with tray icon behavior validated in normal use.
-- Stable `main` branch and separate `dev` integration branch.
 
 <br/>
 
@@ -56,10 +55,7 @@ Branch policy for this fork:
 6. Enter your password when asked.
 7. Launch `Input Remapper` from the applications list.
 
-This is the supported install flow for this fork.
-
 ### Notes
 
 - The current documented target is Ubuntu.
 - Debian and other distributions are not yet documented as validated in this fork.
-- GitHub Issues are currently disabled on this fork.
