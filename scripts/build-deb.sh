@@ -23,7 +23,11 @@ build_deb() {
   # https://www.devdungeon.com/content/debian-package-tutorial-dpkgdeb
   # that was really easy actually
   local python_bin
+  local package_version
+  local output_path
   python_bin="$(pick_python)"
+  package_version="$(sed -n 's/^Version: //p' DEBIAN/control)"
+  output_path="dist/input-remapper-${package_version}.deb"
 
   rm -rf build
   mkdir -p dist
@@ -36,7 +40,7 @@ build_deb() {
   local installed_size
   installed_size="$(du -sk build/deb | awk '{print $1}')"
   printf 'Installed-Size: %s\n' "$installed_size" >> build/deb/DEBIAN/control
-  dpkg-deb --root-owner-group -Z gzip -b build/deb dist/input-remapper-2.2.0.deb
+  dpkg-deb --root-owner-group -Z gzip -b build/deb "$output_path"
 }
 
 build_deb

@@ -21,6 +21,7 @@
 """User Interface."""
 import os
 import subprocess
+import threading
 from typing import Dict, Callable, Tuple, Optional
 
 import gi
@@ -100,6 +101,13 @@ from inputremapper.logging.logger import (
     VERSION,
     EVDEV_VERSION,
     monitor_env_vars,
+)
+from inputremapper.update_service import (
+    UpdateError,
+    UpdateRelease,
+    download_release_asset,
+    fetch_release,
+    release_page_for_channel,
 )
 from inputremapper.user import UserUtils
 
@@ -414,6 +422,10 @@ class UserInterface:
         self._settings_update_install_button = self.get(
             "settings_update_install_button"
         )
+        self._settings_update_release_link = self.get("settings_update_release_link")
+        self._settings_update_status_label = self.get("settings_update_status_label")
+        self._update_release_info: Optional[UpdateRelease] = None
+        self._update_busy = False
         logger.info(
             "Settings widgets found: autostart=%s autohide=%s uninstall=%s update_current=%s update_available=%s update_channel=%s update_check=%s update_install=%s",
             self._settings_autostart_switch is not None,
@@ -439,9 +451,22 @@ class UserInterface:
         if self._settings_update_available_version is not None:
             self._settings_update_available_version.set_text(_("Not checked yet"))
         if self._settings_update_channel_combo is not None:
-            self._settings_update_channel_combo.set_active(0)
+            self._settings_update_channel_combo.set_active(
+                1 if self.controller.data_manager.get_update_channel() == "dev" else 0
+            )
+            self._settings_update_channel_combo.connect(
+                "changed", self._on_settings_update_channel_changed
+            )
+        if self._settings_update_check_button is not None:
+            self._settings_update_check_button.connect(
+                "clicked", self._on_settings_update_check_clicked
+            )
         if self._settings_update_install_button is not None:
             self._settings_update_install_button.set_sensitive(False)
+            self._settings_update_install_button.connect(
+                "clicked", self._on_settings_update_install_clicked
+            )
+        self._sync_update_channel_ui(reset_release=True)
         # uninstall button is connected through GtkBuilder signal
 
     def sync_settings_toggles(self):
@@ -461,6 +486,177 @@ class UserInterface:
                     autohide_enabled if autostart_enabled else False
                 )
                 self._settings_autohide_switch.set_sensitive(autostart_enabled)
+
+    def _selected_update_channel(self) -> str:
+        if self._settings_update_channel_combo is None:
+            return "stable"
+        return "dev" if self._settings_update_channel_combo.get_active() == 1 else "stable"
+
+    def _set_update_status(self, text: str) -> None:
+        if self._settings_update_status_label is not None:
+            self._settings_update_status_label.set_text(text)
+
+    def _sync_update_channel_ui(self, reset_release: bool = False) -> None:
+        channel = self._selected_update_channel()
+        if self._settings_update_release_link is not None:
+            self._settings_update_release_link.set_uri(release_page_for_channel(channel))
+
+        if reset_release:
+            self._update_release_info = None
+            if self._settings_update_available_version is not None:
+                self._settings_update_available_version.set_text(_("Not checked yet"))
+            if self._settings_update_install_button is not None:
+                self._settings_update_install_button.set_sensitive(False)
+            self._set_update_status(
+                _("Ready. Check the selected channel for updates.")
+            )
+
+    def _set_update_busy(self, busy: bool, status: str) -> None:
+        self._update_busy = busy
+        if self._settings_update_check_button is not None:
+            self._settings_update_check_button.set_sensitive(not busy)
+        if self._settings_update_install_button is not None:
+            enable_install = (
+                not busy
+                and self._update_release_info is not None
+                and self._update_release_info.differs_from(VERSION)
+            )
+            self._settings_update_install_button.set_sensitive(enable_install)
+        self._set_update_status(status)
+
+    def _on_settings_update_channel_changed(self, *_):
+        channel = self._selected_update_channel()
+        logger.info("Settings update channel changed to %s", channel)
+        self.controller.data_manager.set_update_channel(channel)
+        self._sync_update_channel_ui(reset_release=True)
+
+    def _on_settings_update_check_clicked(self, *_):
+        if self._update_busy:
+            return
+
+        channel = self._selected_update_channel()
+        self._set_update_busy(True, _("Checking for updates..."))
+        threading.Thread(
+            target=self._check_for_updates_worker,
+            args=(channel,),
+            daemon=True,
+        ).start()
+
+    def _check_for_updates_worker(self, channel: str) -> None:
+        try:
+            release = fetch_release(channel)
+        except UpdateError as error:
+            GLib.idle_add(self._on_update_check_failed, channel, str(error))
+            return
+
+        GLib.idle_add(self._on_update_check_complete, release)
+
+    def _on_update_check_failed(self, channel: str, message: str):
+        if channel != self._selected_update_channel():
+            return False
+
+        self._update_release_info = None
+        if self._settings_update_available_version is not None:
+            self._settings_update_available_version.set_text(_("Unavailable"))
+        if self._settings_update_install_button is not None:
+            self._settings_update_install_button.set_sensitive(False)
+        self._set_update_busy(False, _("Update check failed: ") + message)
+        return False
+
+    def _on_update_check_complete(self, release: UpdateRelease):
+        if release.channel != self._selected_update_channel():
+            return False
+
+        self._update_release_info = release
+        if self._settings_update_available_version is not None:
+            self._settings_update_available_version.set_text(release.version)
+        if self._settings_update_release_link is not None:
+            self._settings_update_release_link.set_uri(release.release_url)
+
+        if release.is_newer_than(VERSION):
+            status = _("A newer version is available on this channel.")
+        elif release.is_older_than(VERSION):
+            status = _(
+                "This channel currently points to an older version. Installing it will downgrade and switch channel."
+            )
+        elif release.differs_from(VERSION):
+            status = _("A different build is available on this channel.")
+        else:
+            status = _("You are already on the selected channel version.")
+
+        self._set_update_busy(False, status)
+        return False
+
+    def _on_settings_update_install_clicked(self, *_):
+        if self._update_busy or self._update_release_info is None:
+            return
+
+        release = self._update_release_info
+        self._set_update_busy(True, _("Downloading update package..."))
+        threading.Thread(
+            target=self._install_update_worker,
+            args=(release,),
+            daemon=True,
+        ).start()
+
+    def _install_update_worker(self, release: UpdateRelease) -> None:
+        try:
+            package_path = download_release_asset(release)
+        except UpdateError as error:
+            GLib.idle_add(self._on_update_install_failed, release.channel, str(error))
+            return
+
+        env = os.environ.copy()
+        env.update(monitor_env_vars())
+        exit_code = subprocess.call(
+            [
+                "pkexec",
+                "input-remapper-control",
+                "--command",
+                "install-package",
+                "--package-path",
+                package_path,
+            ],
+            env=env,
+        )
+        if exit_code != 0:
+            GLib.idle_add(
+                self._on_update_install_failed,
+                release.channel,
+                _("Installer exited with code ") + str(exit_code),
+            )
+            return
+
+        GLib.idle_add(self._on_update_install_complete, release)
+
+    def _on_update_install_failed(self, channel: str, message: str):
+        if channel != self._selected_update_channel():
+            return False
+        self._set_update_busy(False, _("Update install failed: ") + message)
+        return False
+
+    def _on_update_install_complete(self, release: UpdateRelease):
+        if release.channel != self._selected_update_channel():
+            return False
+
+        self._set_update_busy(
+            False,
+            _("Update installed. Input Remapper will now close so you can relaunch the new version."),
+        )
+        dialog = Gtk.MessageDialog(
+            self.window,
+            Gtk.DialogFlags.MODAL | Gtk.DialogFlags.DESTROY_WITH_PARENT,
+            Gtk.MessageType.INFO,
+            Gtk.ButtonsType.CLOSE,
+            _("Update installed"),
+        )
+        dialog.format_secondary_text(
+            _("Input Remapper will close now. Relaunch it to use the new version.")
+        )
+        dialog.run()
+        dialog.hide()
+        self.controller.close()
+        return False
 
     def apply_autostart_toggle(self, desired: bool) -> bool:
         logger.info("Settings autostart toggle requested: %s", desired)

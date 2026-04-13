@@ -54,6 +54,7 @@ class Internals(Enum):
     START_DAEMON = "start-daemon"
     START_READER_SERVICE = "start-reader-service"
     SET_POLKIT = "set-polkit"
+    INSTALL_PACKAGE = "install-package"
     UNINSTALL = "uninstall"
 
 
@@ -67,6 +68,7 @@ class Options:
     debug: bool
     version: str
     polkit: Optional[str]
+    package_path: Optional[str]
     remove_config: bool
 
 
@@ -118,6 +120,7 @@ class InputRemapperControlBin:
                     options.command,
                     options.debug,
                     options.polkit,
+                    options.package_path,
                     options.remove_config,
                 )
             elif options.command in [command.value for command in Commands]:
@@ -288,6 +291,7 @@ class InputRemapperControlBin:
         command: str,
         debug: bool,
         polkit: Optional[str] = None,
+        package_path: Optional[str] = None,
         remove_config: bool = False,
     ) -> None:
         """Methods that are needed to get the gui to work and that require root.
@@ -305,6 +309,9 @@ class InputRemapperControlBin:
                 logger.error("--polkit must be 'enable' or 'disable'")
                 sys.exit(2)
             self._set_polkit_rule(enable=(polkit == "enable"))
+            return
+        elif command == Internals.INSTALL_PACKAGE.value:
+            self._install_package(package_path)
             return
         elif command == Internals.UNINSTALL.value:
             self._uninstall(remove_config=remove_config)
@@ -414,6 +421,53 @@ class InputRemapperControlBin:
                 "Keeping presets/config at %s",
                 os.path.join(UserUtils.home, ".config", "input-remapper-2"),
             )
+
+    def _install_package(self, package_path: Optional[str]) -> None:
+        if not package_path:
+            logger.error("--package-path missing")
+            sys.exit(7)
+
+        path = os.path.abspath(os.path.expanduser(package_path))
+        if not os.path.isfile(path):
+            logger.error('Package "%s" does not exist', path)
+            sys.exit(7)
+
+        env = os.environ.copy()
+        env["DEBIAN_FRONTEND"] = "noninteractive"
+
+        commands = []
+        if shutil.which("apt-get"):
+            commands.append(
+                [
+                    "apt-get",
+                    "-y",
+                    "--allow-downgrades",
+                    "install",
+                    path,
+                ]
+            )
+        if shutil.which("apt"):
+            commands.append(
+                [
+                    "apt",
+                    "-y",
+                    "--allow-downgrades",
+                    "install",
+                    path,
+                ]
+            )
+
+        for command in commands:
+            logger.info("Installing package via `%s`", " ".join(command))
+            if subprocess.call(command, env=env) == 0:
+                try:
+                    os.remove(path)
+                except OSError:
+                    pass
+                return
+
+        logger.error('Failed to install package "%s"', path)
+        sys.exit(10)
 
     def _polkit_rule_path(self, user: str) -> str:
         filename = f"90-input-remapper-{user}.rules"
@@ -585,6 +639,14 @@ class InputRemapperControlBin:
             choices=["enable", "disable"],
             default=None,
             metavar="STATE",
+        )
+        parser.add_argument(
+            "--package-path",
+            action="store",
+            dest="package_path",
+            help="Used with --command install-package: path to the .deb package",
+            default=None,
+            metavar="PATH",
         )
         parser.add_argument(
             "--remove-config",

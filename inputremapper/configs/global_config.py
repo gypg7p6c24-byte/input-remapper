@@ -42,6 +42,7 @@ INITIAL_CONFIG = {
     "ui": {
         "hide_autohide_warning": False,
         "hide_autostart_warning": False,
+        "update_channel": "stable",
     },
 }
 
@@ -169,6 +170,21 @@ class GlobalConfig:
         """Persist whether to suppress the autostart warning."""
         ui_config = self._config.setdefault("ui", {})
         ui_config["hide_autostart_warning"] = bool(dismissed)
+        self._save_config()
+
+    def get_update_channel(self) -> str:
+        """Return the selected update channel."""
+        channel = str(self._config.get("ui", {}).get("update_channel", "stable"))
+        if channel not in {"stable", "dev"}:
+            return "stable"
+        return channel
+
+    def set_update_channel(self, channel: str) -> None:
+        """Persist the selected update channel."""
+        if channel not in {"stable", "dev"}:
+            channel = "stable"
+        ui_config = self._config.setdefault("ui", {})
+        ui_config["update_channel"] = channel
         self._save_config()
 
     def load_config(self, path: Optional[str] = None):

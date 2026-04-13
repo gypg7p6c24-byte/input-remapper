@@ -429,6 +429,23 @@ class TestControl(unittest.TestCase):
         expected_rule = self.input_remapper_control._polkit_rule_path(UserUtils.user)
         self.assertIn(expected_rule, removed_paths)
 
+    def test_install_package_uses_apt_get_with_allow_downgrades(self):
+        package_path = os.path.join(tmp, "input-remapper-2.2.0.deb")
+        PathUtils.touch(package_path)
+
+        with patch.object(shutil, "which", side_effect=lambda cmd: cmd == "apt-get"):
+            with patch.object(subprocess, "call", return_value=0) as call_patch:
+                self.input_remapper_control._install_package(package_path)
+
+        call_patch.assert_called_once()
+        command = call_patch.call_args.args[0]
+        self.assertEqual(command[:4], ["apt-get", "-y", "--allow-downgrades", "install"])
+        self.assertEqual(command[4], os.path.abspath(package_path))
+
+    def test_install_package_requires_existing_file(self):
+        with self.assertRaises(SystemExit):
+            self.input_remapper_control._install_package("/tmp/does-not-exist.deb")
+
 
 if __name__ == "__main__":
     unittest.main()

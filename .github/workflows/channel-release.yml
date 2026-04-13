@@ -1,0 +1,89 @@
+name: Channel Release
+
+on:
+  push:
+    branches:
+      - main
+      - dev
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install build dependencies
+        run: |
+          sudo apt update
+          sudo apt install -y gettext
+
+      - name: Build package
+        run: |
+          ./scripts/build-deb.sh
+
+      - name: Resolve release metadata
+        run: |
+          PACKAGE_PATH="$(find dist -maxdepth 1 -type f -name 'input-remapper-*.deb' | head -n1)"
+          PACKAGE_NAME="$(basename "$PACKAGE_PATH")"
+          APP_VERSION="$(python3 - <<'PY'
+          import tomllib
+          with open("pyproject.toml", "rb") as handle:
+              print(tomllib.load(handle)["project"]["version"])
+          PY
+          )"
+
+          if [ "$GITHUB_REF_NAME" = "main" ]; then
+            CHANNEL="stable"
+            RELEASE_TAG="stable-latest"
+            RELEASE_PRERELEASE="false"
+          else
+            CHANNEL="dev"
+            RELEASE_TAG="dev-latest"
+            RELEASE_PRERELEASE="true"
+          fi
+
+          {
+            echo "PACKAGE_PATH=$PACKAGE_PATH"
+            echo "PACKAGE_NAME=$PACKAGE_NAME"
+            echo "APP_VERSION=$APP_VERSION"
+            echo "CHANNEL=$CHANNEL"
+            echo "RELEASE_TAG=$RELEASE_TAG"
+            echo "RELEASE_PRERELEASE=$RELEASE_PRERELEASE"
+          } >> "$GITHUB_ENV"
+
+      - name: Publish rolling release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          NOTES_FILE="$(mktemp)"
+          cat > "$NOTES_FILE" <<EOF
+          Channel: ${CHANNEL}
+          Branch: ${GITHUB_REF_NAME}
+          Version: ${APP_VERSION}
+          Package: ${PACKAGE_NAME}
+          Commit: ${GITHUB_SHA}
+          EOF
+
+          gh release delete "${RELEASE_TAG}" \
+            --repo "${GITHUB_REPOSITORY}" \
+            --yes \
+            --cleanup-tag || true
+
+          if [ "${RELEASE_PRERELEASE}" = "true" ]; then
+            gh release create "${RELEASE_TAG}" "${PACKAGE_PATH}" \
+              --repo "${GITHUB_REPOSITORY}" \
+              --target "${GITHUB_SHA}" \
+              --title "${APP_VERSION}" \
+              --notes-file "${NOTES_FILE}" \
+              --prerelease
+          else
+            gh release create "${RELEASE_TAG}" "${PACKAGE_PATH}" \
+              --repo "${GITHUB_REPOSITORY}" \
+              --target "${GITHUB_SHA}" \
+              --title "${APP_VERSION}" \
+              --notes-file "${NOTES_FILE}"
+          fi

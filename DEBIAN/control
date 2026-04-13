@@ -1,5 +1,5 @@
 Package: input-remapper
-Version: 2.2.0
+Version: 2.2.1~dev1
 Architecture: all
 Section: utils
 Priority: optional

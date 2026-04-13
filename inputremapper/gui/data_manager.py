@@ -274,6 +274,14 @@ class DataManager:
         """Persist whether to suppress the autostart warning."""
         self._config.set_autostart_warning_dismissed(dismissed)
 
+    def get_update_channel(self) -> str:
+        """Return the selected update channel."""
+        return self._config.get_update_channel()
+
+    def set_update_channel(self, channel: str) -> None:
+        """Persist the selected update channel."""
+        self._config.set_update_channel(channel)
+
     def set_game_binding(self, game_id: Optional[str]):
         """Bind the active preset to a game id (or remove the binding)."""
         if not self.active_preset or not self.active_group:
