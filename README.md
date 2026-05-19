@@ -48,7 +48,7 @@ Branch policy for this fork:
 
 1. Open the [stable release page](https://github.com/gypg7p6c24-byte/input-remapper/releases/tag/stable-latest).
 2. Download the `.deb` asset attached to that release.
-   Current stable file: `input-remapper-2.2.0.deb`
+   Current stable file: `input-remapper-2.3.1.deb`
 3. Double-click the downloaded file.
 4. App Center opens.
 5. Click `Install`.

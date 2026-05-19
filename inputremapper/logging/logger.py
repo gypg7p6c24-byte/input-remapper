@@ -226,7 +226,7 @@ class Logger(logging.Logger):
     def log_info(self, name: str = "input-remapper") -> None:
         """Log version and name to the console."""
         logger.info(
-            "%s %s %s https://github.com/sezanzeb/input-remapper",
+            "%s %s %s https://github.com/gypg7p6c24-byte/input-remapper",
             name,
             VERSION,
             COMMIT_HASH,

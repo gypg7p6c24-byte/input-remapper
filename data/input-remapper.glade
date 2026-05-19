@@ -1380,7 +1380,7 @@ Only relevant when mapping relative inputs (e.g. mouse) to absolute outputs (e.g
                       <object class="GtkLabel" id="settings_update_current_version">
                         <property name="visible">True</property>
                         <property name="can-focus">False</property>
-                        <property name="label">2.2.1.dev1</property>
+                        <property name="label">2.3.2.dev1</property>
                         <property name="xalign">0</property>
                         <property name="selectable">True</property>
                       </object>
@@ -1770,8 +1770,8 @@ Only relevant when mapping relative inputs (e.g. mouse) to absolute outputs (e.g
                 <property name="margin-right">6</property>
                 <property name="margin-start">6</property>
                 <property name="margin-end">6</property>
-                <property name="label" translatable="yes">You can find more information and report bugs at
-&lt;a href="https://github.com/sezanzeb/input-remapper"&gt;https://github.com/sezanzeb/input-remapper&lt;/a&gt;</property>
+                <property name="label" translatable="yes">You can find more information about this fork at
+&lt;a href="https://github.com/gypg7p6c24-byte/input-remapper"&gt;https://github.com/gypg7p6c24-byte/input-remapper&lt;/a&gt;</property>
                 <property name="use-markup">True</property>
                 <property name="justify">center</property>
               </object>
@@ -1836,13 +1836,13 @@ See the &lt;a href="https://www.gnu.org/licenses/gpl-3.0.html"&gt;GNU General Pu
                       <object class="GtkLabel">
                         <property name="visible">True</property>
                         <property name="can-focus">False</property>
-                        <property name="label" translatable="yes">See &lt;a href="https://github.com/sezanzeb/input-remapper/blob/HEAD/readme/usage.md"&gt;usage.md&lt;/a&gt; online on github for comprehensive information.
+                        <property name="label" translatable="yes">See &lt;a href="https://github.com/gypg7p6c24-byte/input-remapper/blob/HEAD/readme/usage.md"&gt;usage.md&lt;/a&gt; online on github for comprehensive information.
 
 A "key + key + ... + key" syntax can be used to trigger key combinations. For example "Control_L + a".
 
 Writing "disable" as a mapping disables a key.
 
-Macros allow multiple characters to be written with a single key-press. Information about programming them is available online on github. See &lt;a href="https://github.com/sezanzeb/input-remapper/blob/HEAD/readme/macros.md"&gt;macros.md&lt;/a&gt; and &lt;a href="https://github.com/sezanzeb/input-remapper/blob/HEAD/readme/examples.md"&gt;examples.md&lt;/a&gt;</property>
+Macros allow multiple characters to be written with a single key-press. Information about programming them is available online on github. See &lt;a href="https://github.com/gypg7p6c24-byte/input-remapper/blob/HEAD/readme/macros.md"&gt;macros.md&lt;/a&gt; and &lt;a href="https://github.com/gypg7p6c24-byte/input-remapper/blob/HEAD/readme/examples.md"&gt;examples.md&lt;/a&gt;</property>
                         <property name="use-markup">True</property>
                         <property name="wrap">True</property>
                         <property name="xalign">0</property>

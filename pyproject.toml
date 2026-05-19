@@ -1,6 +1,6 @@
 [project]
 name = "input-remapper"
-version = "2.2.1.dev1"
+version = "2.3.2.dev1"
 description = "A tool to change the mapping of your input device buttons"
 authors = [
     { name = "Sezanzeb", email = "b8x45ygc9@mozmail.com" },
@@ -23,7 +23,7 @@ where = ["."]
 include = ["inputremapper*"]
 
 [project.urls]
-Homepage = "https://github.com/sezanzeb/input-remapper"
+Homepage = "https://github.com/gypg7p6c24-byte/input-remapper"
 
 [tool.ruff.lint]
 # Because of gi.require_version we get this a lot
