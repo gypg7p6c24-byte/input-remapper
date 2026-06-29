@@ -69,3 +69,29 @@ class UserUtils:
     #  which then initializes stuff.
     user = get_user()
     home = get_home(user)
+
+
+def is_flatpak() -> bool:
+    """Whether input-remapper is running inside a Flatpak sandbox."""
+    return os.path.exists("/.flatpak-info")
+
+
+def session_bus_enabled() -> bool:
+    """Use the per-user session bus instead of the system bus.
+
+    On SteamOS / Steam Deck input-remapper ships as a Flatpak. A sandboxed
+    process cannot own a name on the system bus and cannot use pkexec, so the
+    whole IPC (gui <-> service <-> reader) runs on the session bus and the
+    components run as the regular user. Device access (uinput) is granted by a
+    host udev rule instead of by running as root. See install/flatpak/.
+
+    Forced on/off with INPUT_REMAPPER_SESSION_BUS=1/0, otherwise auto-detected
+    from the Flatpak sandbox marker. Native (Debian/Ubuntu/Arch) installs are
+    unaffected: the system bus and pkexec path stay the default.
+    """
+    override = os.environ.get("INPUT_REMAPPER_SESSION_BUS")
+    if override == "1":
+        return True
+    if override == "0":
+        return False
+    return is_flatpak()

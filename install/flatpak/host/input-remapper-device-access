@@ -1,0 +1,64 @@
+#!/bin/bash
+# Host-side helper for the Input Remapper Flatpak on SteamOS / Steam Deck.
+#
+# A Flatpak sandbox cannot grant itself kernel-level device access. This script
+# performs the single privileged, persistent setup needed for remapping:
+#   - a udev rule granting the "input" group access to /dev/uinput and input
+#     devices (written to /etc, which survives SteamOS updates),
+#   - loading the uinput kernel module now and on every boot,
+#   - adding the target user to the "input" group.
+#
+# It is meant to be invoked once, from inside the app, behind a single password
+# prompt, e.g.:
+#   flatpak-spawn --host pkexec \
+#       /path/to/input-remapper-device-access enable "$USER"
+#
+# Usage: input-remapper-device-access {enable|disable} [user]
+set -euo pipefail
+
+RULE="/etc/udev/rules.d/99-input-remapper-uinput.rules"
+MODLOAD="/etc/modules-load.d/input-remapper-uinput.conf"
+ACTION="${1:-}"
+TARGET_USER="${2:-${PKEXEC_UID:+$(id -un "$PKEXEC_UID" 2>/dev/null)}}"
+TARGET_USER="${TARGET_USER:-${SUDO_USER:-}}"
+
+if [ "$(id -u)" -ne 0 ]; then
+    echo "This helper must run as root (via pkexec)." >&2
+    exit 1
+fi
+
+reload_udev() {
+    udevadm control --reload-rules 2>/dev/null || true
+    udevadm trigger /dev/uinput 2>/dev/null || true
+    udevadm trigger --subsystem-match=input 2>/dev/null || true
+}
+
+case "$ACTION" in
+    enable)
+        cat > "$RULE" <<'EOF'
+# Installed by Input Remapper (Flatpak). Grants the "input" group access to
+# uinput and input devices so the sandboxed service can read/inject events
+# without running as root.
+KERNEL=="uinput", SUBSYSTEM=="misc", MODE="0660", GROUP="input", OPTIONS+="static_node=uinput"
+SUBSYSTEM=="input", GROUP="input", MODE="0660"
+EOF
+        echo "uinput" > "$MODLOAD"
+        modprobe uinput 2>/dev/null || true
+        if [ -n "$TARGET_USER" ]; then
+            getent group input >/dev/null || groupadd input || true
+            usermod -aG input "$TARGET_USER" || true
+            echo "Added $TARGET_USER to the 'input' group (re-login may be required)."
+        fi
+        reload_udev
+        echo "Device access enabled."
+        ;;
+    disable)
+        rm -f "$RULE" "$MODLOAD"
+        reload_udev
+        echo "Device access disabled (group membership left untouched)."
+        ;;
+    *)
+        echo "Usage: $0 {enable|disable} [user]" >&2
+        exit 2
+        ;;
+esac

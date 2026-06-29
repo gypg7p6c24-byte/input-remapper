@@ -8,7 +8,7 @@
   triggers, keys, mouse-movements and more. Maps any input to any other input.
 </p>
 
-<p align="center"><a href="readme/usage.md">Usage</a> - <a href="readme/macros.md">Macros</a> - <a href="#installation">Installation</a> - <a href="readme/development.md">Development</a> - <a href="readme/examples.md">Examples</a></p>
+<p align="center"><a href="readme/usage.md">Usage</a> - <a href="readme/macros.md">Macros</a> - <a href="#installation">Installation</a> - <a href="readme/steamos.md">SteamOS</a> - <a href="readme/development.md">Development</a> - <a href="readme/examples.md">Examples</a></p>
 
 <p align="center"><img src="readme/pylint.svg"/> <img src="readme/coverage.svg"/></p>
 
@@ -55,7 +55,15 @@ Branch policy for this fork:
 6. Enter your password when asked.
 7. Launch `Input Remapper` from the applications list.
 
+### SteamOS / Steam Deck
+
+SteamOS is immutable, so Input Remapper ships there as a **Flatpak** (one-click,
+survives OS updates) instead of a native package. Per-game presets work for both
+Steam and non-Steam games. See the dedicated guide: **[readme/steamos.md](readme/steamos.md)**
+(packaging details and porting checklist in [install/flatpak/](install/flatpak/README.md)).
+
 ### Notes
 
-- The current documented target is Ubuntu.
+- Documented targets: Ubuntu (`.deb`) and SteamOS / Steam Deck (Flatpak).
+- The SteamOS Flatpak is being finalised and iterated on-device.
 - Debian and other distributions are not yet documented as validated in this fork.

@@ -1,0 +1,75 @@
+# Input Remapper on SteamOS / Steam Deck
+
+This page covers installing and using Input Remapper on **SteamOS** (PC or Steam
+Deck) in **Desktop mode (KDE Plasma)**. For Ubuntu, see the main
+[README](../README.md).
+
+## Why this is different from a normal Linux install
+
+SteamOS uses a **read-only, immutable** system. Anything installed into the
+system with `pacman` is **erased on the next OS update**, and the graphical
+libraries Input Remapper needs are not part of the base image. So instead of a
+native install, SteamOS uses a **Flatpak**, which:
+
+- bundles every dependency (GTK3, GtkSourceView4, PyGObject, tray indicator,
+  and the Python libraries),
+- installs under `/home`, so it **survives SteamOS updates**,
+- installs and uninstalls in **one click** (no terminal), via the bundle or the
+  Discover store.
+
+## The one system permission
+
+Remapping needs kernel access to `uinput`. A sandbox can't grant that itself, so
+it is done **once**, from inside the app, behind a **single password prompt**:
+
+- a udev rule is written to `/etc/udev/rules.d/` (`/etc` survives OS updates),
+- the `uinput` module is loaded at boot,
+- your user is added to the `input` group.
+
+Helper script: [`install/flatpak/host/input-remapper-device-access`](../install/flatpak/host/input-remapper-device-access),
+run on the host via `flatpak-spawn --host pkexec`. Disabling it later removes the
+rule. **Your presets are always kept** unless you explicitly ask to remove them.
+
+## Install
+
+Build/packaging details and the current porting checklist are in
+[`install/flatpak/README.md`](../install/flatpak/README.md).
+
+End-user flow once published: open the bundle / Discover entry → **Install** →
+first launch asks for your password once to enable device access → done. The
+app lives in the tray; closing the window keeps it running, "Quit" from the
+tray stops it.
+
+## Per-game presets (Steam and non-Steam)
+
+Input Remapper detects the running game and loads the preset you bound to it,
+then reverts when the game closes. This works for:
+
+- **Steam games** — detected from Steam's launch environment (`SteamAppId`,
+  Proton compatibility variables, the command line).
+- **Non-Steam games** — add the game to Steam with *Games → Add a Non-Steam
+  Game to My Library*; it is detected through Steam's `shortcuts.vdf`.
+
+Libraries on the **internal drive and microSD** are both scanned (via Steam's
+`libraryfolders.vdf`). Bind a preset to a game in the editor, enable autostart so
+the app runs hidden in the tray, and presets switch automatically as you launch
+and close games.
+
+## Uninstall (one click)
+
+1. In the app: **Settings → Uninstall** (removes device access; keeps presets
+   unless you tick "also remove presets").
+2. Remove the Flatpak (Discover, or
+   `flatpak uninstall io.github.sezanzeb.input_remapper`).
+
+## Updates
+
+The in-app updater supports release **channels** (stable / dev) from the GitHub
+repo and, on SteamOS, offers the matching **Flatpak** bundle instead of the
+`.deb`.
+
+## Status
+
+The Flatpak packaging is being finalised and iterated on-device. See the porting
+checklist in [`install/flatpak/README.md`](../install/flatpak/README.md). Report
+issues with the first build error and we adapt from there.
