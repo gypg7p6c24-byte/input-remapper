@@ -53,6 +53,7 @@ from evdev.ecodes import EV_KEY, EV_ABS, EV_REL, REL_HWHEEL, REL_WHEEL
 
 from inputremapper.configs.input_config import InputCombination, InputConfig
 from inputremapper.configs.mapping import Mapping
+from inputremapper.user import session_bus_enabled
 from inputremapper.groups import _Groups, _Group
 from inputremapper.injection.event_reader import EventReader
 from inputremapper.injection.global_uinputs import GlobalUInputs
@@ -154,13 +155,21 @@ class ReaderService:
             allow_user_interaction: If False, pkexec will not open an auth prompt.
         """
         debug = " -d" if logger.level <= logging.DEBUG else ""
-        pkexec = "pkexec"
-        if not allow_user_interaction:
-            pkexec += " --disable-internal-agent"
-        cmd = (
-            f"{monitor_env_prefix()}"
-            f"{pkexec} input-remapper-control --command start-reader-service{debug}"
-        )
+        if session_bus_enabled():
+            # Flatpak/SteamOS: no pkexec in the sandbox. The reader runs as the
+            # regular user; device access comes from the host udev rule.
+            cmd = (
+                f"{monitor_env_prefix()}"
+                f"input-remapper-control --command start-reader-service{debug}"
+            )
+        else:
+            pkexec = "pkexec"
+            if not allow_user_interaction:
+                pkexec += " --disable-internal-agent"
+            cmd = (
+                f"{monitor_env_prefix()}"
+                f"{pkexec} input-remapper-control --command start-reader-service{debug}"
+            )
 
         logger.debug("Running `%s`", cmd)
         exit_code = os.system(cmd)

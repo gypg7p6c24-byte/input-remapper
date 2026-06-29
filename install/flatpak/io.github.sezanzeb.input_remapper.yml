@@ -25,6 +25,8 @@ sdk: org.gnome.Sdk
 command: input-remapper-gtk
 
 finish-args:
+  # Force the session-bus / no-pkexec code path inside the sandbox.
+  - --env=INPUT_REMAPPER_SESSION_BUS=1
   # Display
   - --socket=wayland
   - --socket=fallback-x11
@@ -34,10 +36,13 @@ finish-args:
   # Tray icon (StatusNotifier) on the KDE panel
   - --talk-name=org.kde.StatusNotifierWatcher
   - --talk-name=org.freedesktop.Notifications
-  # IPC between the GUI, the reader-service and the injection service
+  # IPC between the GUI, the reader-service and the injection service.
+  # In the sandbox everything runs on the session bus (see inputremapper/user.py
+  # session_bus_enabled), so the app owns the name on the session bus.
   - --own-name=inputremapper.Control
   - --talk-name=inputremapper.Control
-  - --system-talk-name=inputremapper.Control
+  # Run the one-time host device-access helper (udev rule) via flatpak-spawn.
+  - --talk-name=org.freedesktop.Flatpak
   # Read Steam's installed-game manifests and non-Steam shortcuts so per-game
   # presets can be matched (internal drive, microSD libraries, Flatpak Steam).
   - --filesystem=~/.steam:ro
@@ -75,7 +80,7 @@ modules:
       - type: git
         url: https://github.com/AyatanaIndicators/libayatana-appindicator.git
         tag: 0.5.93
-    # verify on device: pulls libdbusmenu + libairatana-indicator (add as
+    # verify on device: pulls libdbusmenu + libayatana-indicator (add as
     # sub-modules if the build complains about missing deps).
 
   # --- Python dependencies not bundled in the GNOME runtime ---
@@ -101,6 +106,10 @@ modules:
       # Stage all data files (binaries, .desktop, icons, dbus conf, udev rule,
       # service unit) and the python module into the Flatpak prefix.
       - python3 -m install --root=${FLATPAK_DEST}
+      # Ship the host device-access helper so the app can run it via
+      # `flatpak-spawn --host pkexec`.
+      - install -Dm755 install/flatpak/host/input-remapper-device-access
+        ${FLATPAK_DEST}/bin/input-remapper-device-access
     sources:
       - type: dir
         path: ../..

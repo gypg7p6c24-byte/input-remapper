@@ -33,7 +33,7 @@ from typing import Dict, Optional, Protocol
 
 import gi
 from dasbus.error import DBusError
-from dasbus.connection import SystemMessageBus
+from dasbus.connection import SystemMessageBus, SessionMessageBus
 from dasbus.identifier import DBusServiceIdentifier
 from dasbus.loop import EventLoop
 
@@ -47,12 +47,14 @@ from inputremapper.injection.injector import Injector, InjectorState
 from inputremapper.injection.macros.macro import macro_variables
 from inputremapper.injection.mapping_handlers.mapping_parser import MappingParser
 from inputremapper.logging.logger import logger, monitor_env_prefix
-from inputremapper.user import UserUtils
+from inputremapper.user import UserUtils, session_bus_enabled
 
 gi.require_version("GLib", "2.0")
 
 
-SYSTEM_BUS = SystemMessageBus()
+# In a Flatpak sandbox (SteamOS) the system bus is unavailable, so the whole IPC
+# runs on the session bus. Native installs keep using the system bus.
+SYSTEM_BUS = SessionMessageBus() if session_bus_enabled() else SystemMessageBus()
 
 DAEMON = DBusServiceIdentifier(
     namespace=("inputremapper", "Control"),
@@ -243,10 +245,18 @@ class Daemon:
             # Runs via input-remapper-control so that auth_admin_keep works
             # for all pkexec calls of the gui
             debug = " -d" if logger.is_debug() else ""
-            cmd = (
-                f"{monitor_env_prefix()}"
-                f"pkexec input-remapper-control --command start-daemon {debug}"
-            )
+            if session_bus_enabled():
+                # Flatpak/SteamOS: no pkexec inside the sandbox. The service runs
+                # as the regular user; uinput access comes from the host udev rule.
+                cmd = (
+                    f"{monitor_env_prefix()}"
+                    f"input-remapper-control --command start-daemon {debug}"
+                )
+            else:
+                cmd = (
+                    f"{monitor_env_prefix()}"
+                    f"pkexec input-remapper-control --command start-daemon {debug}"
+                )
 
             # using pkexec will also cause the service to continue running in
             # the background after the gui has been closed, which will keep
