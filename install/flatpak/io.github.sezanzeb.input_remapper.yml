@@ -1,0 +1,106 @@
+# Flatpak manifest for Input Remapper (SteamOS / Steam Deck target, KDE Desktop mode).
+#
+# Goal: one-click, no-terminal install that bundles every graphical library the
+# window needs (GTK3, GtkSourceView4, PyGObject, AppIndicator for the tray) plus
+# the Python dependencies, so it works on the immutable SteamOS filesystem and
+# survives OS updates (Flatpak data lives under /home).
+#
+# The only thing Flatpak cannot provide is kernel-level device access (uinput).
+# That is handled once, from inside the app, by writing a udev rule to /etc
+# (which persists across SteamOS updates) behind a single password prompt.
+# See install/flatpak/README.md.
+#
+# Build (on the SteamOS machine, in Desktop mode):
+#   flatpak install -y flathub org.gnome.Platform//47 org.gnome.Sdk//47
+#   flatpak-builder --user --install --force-clean build-dir \
+#       install/flatpak/io.github.sezanzeb.input_remapper.yml
+#
+# NOTE: this is the first packaging cut and is meant to be iterated on-device.
+# Modules marked "verify on device" may need a version bump for your SteamOS.
+
+app-id: io.github.sezanzeb.input_remapper
+runtime: org.gnome.Platform
+runtime-version: '47'
+sdk: org.gnome.Sdk
+command: input-remapper-gtk
+
+finish-args:
+  # Display
+  - --socket=wayland
+  - --socket=fallback-x11
+  - --share=ipc
+  # All input devices + uinput for reading and injecting events
+  - --device=all
+  # Tray icon (StatusNotifier) on the KDE panel
+  - --talk-name=org.kde.StatusNotifierWatcher
+  - --talk-name=org.freedesktop.Notifications
+  # IPC between the GUI, the reader-service and the injection service
+  - --own-name=inputremapper.Control
+  - --talk-name=inputremapper.Control
+  - --system-talk-name=inputremapper.Control
+  # Read Steam's installed-game manifests and non-Steam shortcuts so per-game
+  # presets can be matched (internal drive, microSD libraries, Flatpak Steam).
+  - --filesystem=~/.steam:ro
+  - --filesystem=~/.local/share/Steam:ro
+  - --filesystem=~/.var/app/com.valvesoftware.Steam:ro
+  - --filesystem=/run/media:ro
+  # Persist presets and config under the host home (kept on uninstall by default)
+  - --filesystem=~/.config/input-remapper-2:create
+
+modules:
+  # --- GtkSourceView 4 (the GNOME 47 runtime ships v5; the editor uses v4) ---
+  - name: gtksourceview4
+    buildsystem: meson
+    config-opts:
+      - -Dvapi=false
+      - -Dgtk_doc=false
+      - -Dsysprof=false
+    sources:
+      - type: archive
+        url: https://download.gnome.org/sources/gtksourceview/4.8/gtksourceview-4.8.4.tar.xz
+        sha256: REPLACE_WITH_REAL_SHA256
+    cleanup:
+      - /include
+      - /lib/pkgconfig
+      - '*.la'
+
+  # --- AppIndicator/Ayatana for the tray icon (not in the GNOME runtime) ---
+  - name: libayatana-appindicator
+    buildsystem: cmake-ninja
+    config-opts:
+      - -DENABLE_BINDINGS_MONO=NO
+      - -DENABLE_BINDINGS_VALA=NO
+      - -DENABLE_GTKDOC=NO
+    sources:
+      - type: git
+        url: https://github.com/AyatanaIndicators/libayatana-appindicator.git
+        tag: 0.5.93
+    # verify on device: pulls libdbusmenu + libairatana-indicator (add as
+    # sub-modules if the build complains about missing deps).
+
+  # --- Python dependencies not bundled in the GNOME runtime ---
+  # PyGObject and pycairo are already provided by org.gnome.Platform.
+  # Regenerate this module with flatpak-pip-generator for the exact wheel set
+  # and sha256 values available for the runtime's Python, then drop it in here.
+  - name: python-deps
+    buildsystem: simple
+    build-commands:
+      - >-
+        pip3 install --verbose --no-index --find-links="file://${PWD}"
+        --prefix=${FLATPAK_DEST} evdev dasbus pydantic psutil packaging
+    sources:
+      # verify on device: replace with the real wheel/sdist list + hashes.
+      - type: file
+        url: https://files.pythonhosted.org/packages/source/e/evdev/evdev-1.7.1.tar.gz
+        sha256: REPLACE_WITH_REAL_SHA256
+
+  # --- Input Remapper itself (this repository) ---
+  - name: input-remapper
+    buildsystem: simple
+    build-commands:
+      # Stage all data files (binaries, .desktop, icons, dbus conf, udev rule,
+      # service unit) and the python module into the Flatpak prefix.
+      - python3 -m install --root=${FLATPAK_DEST}
+    sources:
+      - type: dir
+        path: ../..
