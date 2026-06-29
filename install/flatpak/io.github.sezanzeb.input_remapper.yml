@@ -55,7 +55,6 @@ modules:
     config-opts:
       - -Dvapi=false
       - -Dgtk_doc=false
-      - -Dsysprof=false
     sources:
       - type: git
         url: https://gitlab.gnome.org/GNOME/gtksourceview.git
