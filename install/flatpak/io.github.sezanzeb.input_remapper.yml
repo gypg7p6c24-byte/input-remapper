@@ -1,22 +1,18 @@
 # Flatpak manifest for Input Remapper (SteamOS / Steam Deck target, KDE Desktop mode).
 #
-# Goal: one-click, no-terminal install that bundles every graphical library the
-# window needs (GTK3, GtkSourceView4, PyGObject, AppIndicator for the tray) plus
-# the Python dependencies, so it works on the immutable SteamOS filesystem and
-# survives OS updates (Flatpak data lives under /home).
+# Goal: a single downloadable bundle that installs in one click and bundles every
+# graphical library the window needs, so it works on the immutable SteamOS
+# filesystem and survives OS updates (Flatpak data lives under /home).
+#
+# This bundle is built by GitHub Actions (.github/workflows/flatpak.yml), not on
+# the end-user's machine. Dependencies are fetched from PyPI/git at build time
+# (no machine-specific pinning). This is intentionally NOT Flathub-compliant yet
+# (network access during build); pin with flatpak-pip-generator before any
+# Flathub submission.
 #
 # The only thing Flatpak cannot provide is kernel-level device access (uinput).
 # That is handled once, from inside the app, by writing a udev rule to /etc
 # (which persists across SteamOS updates) behind a single password prompt.
-# See install/flatpak/README.md.
-#
-# Build (on the SteamOS machine, in Desktop mode):
-#   flatpak install -y flathub org.gnome.Platform//47 org.gnome.Sdk//47
-#   flatpak-builder --user --install --force-clean build-dir \
-#       install/flatpak/io.github.sezanzeb.input_remapper.yml
-#
-# NOTE: this is the first packaging cut and is meant to be iterated on-device.
-# Modules marked "verify on device" may need a version bump for your SteamOS.
 
 app-id: io.github.sezanzeb.input_remapper
 runtime: org.gnome.Platform
@@ -31,20 +27,20 @@ finish-args:
   - --socket=wayland
   - --socket=fallback-x11
   - --share=ipc
+  # The in-app updater talks to GitHub
+  - --share=network
   # All input devices + uinput for reading and injecting events
   - --device=all
   # Tray icon (StatusNotifier) on the KDE panel
   - --talk-name=org.kde.StatusNotifierWatcher
   - --talk-name=org.freedesktop.Notifications
-  # IPC between the GUI, the reader-service and the injection service.
-  # In the sandbox everything runs on the session bus (see inputremapper/user.py
-  # session_bus_enabled), so the app owns the name on the session bus.
+  # IPC between the GUI, the reader-service and the injection service (session bus)
   - --own-name=inputremapper.Control
   - --talk-name=inputremapper.Control
-  # Run the one-time host device-access helper (udev rule) via flatpak-spawn.
+  # Run the one-time host device-access helper (udev rule) via flatpak-spawn
   - --talk-name=org.freedesktop.Flatpak
   # Read Steam's installed-game manifests and non-Steam shortcuts so per-game
-  # presets can be matched (internal drive, microSD libraries, Flatpak Steam).
+  # presets can be matched (internal drive, microSD libraries, Flatpak Steam)
   - --filesystem=~/.steam:ro
   - --filesystem=~/.local/share/Steam:ro
   - --filesystem=~/.var/app/com.valvesoftware.Steam:ro
@@ -61,55 +57,42 @@ modules:
       - -Dgtk_doc=false
       - -Dsysprof=false
     sources:
-      - type: archive
-        url: https://download.gnome.org/sources/gtksourceview/4.8/gtksourceview-4.8.4.tar.xz
-        sha256: REPLACE_WITH_REAL_SHA256
+      - type: git
+        url: https://gitlab.gnome.org/GNOME/gtksourceview.git
+        tag: '4.8.4'
     cleanup:
       - /include
       - /lib/pkgconfig
       - '*.la'
 
-  # --- AppIndicator/Ayatana for the tray icon (not in the GNOME runtime) ---
-  - name: libayatana-appindicator
-    buildsystem: cmake-ninja
-    config-opts:
-      - -DENABLE_BINDINGS_MONO=NO
-      - -DENABLE_BINDINGS_VALA=NO
-      - -DENABLE_GTKDOC=NO
-    sources:
-      - type: git
-        url: https://github.com/AyatanaIndicators/libayatana-appindicator.git
-        tag: 0.5.93
-    # verify on device: pulls libdbusmenu + libayatana-indicator (add as
-    # sub-modules if the build complains about missing deps).
-
   # --- Python dependencies not bundled in the GNOME runtime ---
   # PyGObject and pycairo are already provided by org.gnome.Platform.
-  # Regenerate this module with flatpak-pip-generator for the exact wheel set
-  # and sha256 values available for the runtime's Python, then drop it in here.
+  # Installed straight from PyPI at build time (network enabled below).
   - name: python-deps
     buildsystem: simple
+    build-options:
+      build-args:
+        - --share=network
     build-commands:
-      - >-
-        pip3 install --verbose --no-index --find-links="file://${PWD}"
-        --prefix=${FLATPAK_DEST} evdev dasbus pydantic psutil packaging
-    sources:
-      # verify on device: replace with the real wheel/sdist list + hashes.
-      - type: file
-        url: https://files.pythonhosted.org/packages/source/e/evdev/evdev-1.7.1.tar.gz
-        sha256: REPLACE_WITH_REAL_SHA256
+      - pip3 install --prefix=${FLATPAK_DEST} evdev dasbus pydantic psutil packaging
 
-  # --- Input Remapper itself (this repository) ---
+  # --- Input Remapper itself (built from this repository) ---
   - name: input-remapper
     buildsystem: simple
+    build-options:
+      build-args:
+        - --share=network
     build-commands:
-      # Stage all data files (binaries, .desktop, icons, dbus conf, udev rule,
-      # service unit) and the python module into the Flatpak prefix.
+      # Stage the python module + data files using the project's installer.
       - python3 -m install --root=${FLATPAK_DEST}
-      # Ship the host device-access helper so the app can run it via
-      # `flatpak-spawn --host pkexec`.
-      - install -Dm755 install/flatpak/host/input-remapper-device-access
-        ${FLATPAK_DEST}/bin/input-remapper-device-access
+      # The installer lays things out under /usr; Flatpak expects /app. Move the
+      # tree up one level and point the data dir at /app.
+      - 'cp -a ${FLATPAK_DEST}/usr/. ${FLATPAK_DEST}/ 2>/dev/null || true'
+      - 'rm -rf ${FLATPAK_DEST}/usr'
+      - 'sed -i "s|/usr/share/input-remapper|/app/share/input-remapper|g" ${FLATPAK_DEST}/lib/python*/site-packages/inputremapper/installation_info.py || true'
+      # Ship the host device-access helper (run via flatpak-spawn --host pkexec).
+      - install -Dm755 install/flatpak/host/input-remapper-device-access ${FLATPAK_DEST}/bin/input-remapper-device-access
     sources:
-      - type: dir
-        path: ../..
+      - type: git
+        url: https://github.com/gypg7p6c24-byte/input-remapper.git
+        branch: dev

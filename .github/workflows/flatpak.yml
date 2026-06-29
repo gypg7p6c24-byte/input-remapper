@@ -1,0 +1,45 @@
+name: Flatpak bundle
+
+# Builds a downloadable one-click .flatpak on GitHub's runners, independent of
+# any contributor's machine. The bundle is uploaded as a workflow artifact on
+# every run, and attached to a GitHub Release when a v* tag is pushed.
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [dev]
+    paths:
+      - 'install/flatpak/**'
+      - '.github/workflows/flatpak.yml'
+      - 'inputremapper/**'
+      - 'bin/**'
+      - 'data/**'
+      - 'install/**'
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  flatpak:
+    name: Build bundle
+    runs-on: ubuntu-latest
+    container:
+      image: bilelmoussaoui/flatpak-github-actions:gnome-47
+      options: --privileged
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build Flatpak bundle
+        uses: flatpak/flatpak-github-actions/flatpak-builder@v6
+        with:
+          bundle: input-remapper.flatpak
+          manifest-path: install/flatpak/io.github.sezanzeb.input_remapper.yml
+          cache-key: flatpak-builder-${{ github.sha }}
+
+      - name: Attach bundle to release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: input-remapper.flatpak
