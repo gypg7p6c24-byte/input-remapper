@@ -11,8 +11,7 @@
 # Flathub submission.
 #
 # The only thing Flatpak cannot provide is kernel-level device access (uinput).
-# That is handled once, from inside the app, by writing a udev rule to /etc
-# (which persists across SteamOS updates) behind a single password prompt.
+# On SteamOS that is already granted (Valve's uaccess ACL on /dev/uinput).
 
 app-id: io.github.sezanzeb.input_remapper
 runtime: org.gnome.Platform
@@ -35,7 +34,7 @@ finish-args:
   - --share=network
   # All input devices + uinput for reading and injecting events
   - --device=all
-  # Tray icon (StatusNotifier) on the KDE panel
+  # Tray icon (StatusNotifierItem) on the KDE panel
   - --talk-name=org.kde.StatusNotifierWatcher
   - --talk-name=org.freedesktop.Notifications
   # The service owns inputremapper.Control on the session bus. IMPORTANT: do NOT
@@ -68,6 +67,57 @@ modules:
       - /include
       - /lib/pkgconfig
       - '*.la'
+
+  # --- Tray icon stack (StatusNotifierItem) for KDE Plasma Wayland ---
+  # Gtk.StatusIcon is invisible on Wayland; KDE needs SNI via AppIndicator.
+  - name: libdbusmenu
+    buildsystem: autotools
+    build-options:
+      cflags: -Wno-error
+      env:
+        HAVE_VALGRIND_FALSE: '#'
+        HAVE_VALGRIND_TRUE: ''
+    config-opts:
+      - --with-gtk=3
+      - --disable-dumper
+      - --disable-static
+      - --disable-tests
+      - --disable-gtk-doc
+      - --enable-introspection=yes
+      - --disable-vala
+    cleanup:
+      - /include
+      - /libexec
+      - /lib/pkgconfig
+      - '*.la'
+    sources:
+      - type: archive
+        url: https://launchpad.net/libdbusmenu/16.04/16.04.0/+download/libdbusmenu-16.04.0.tar.gz
+        sha256: b9cc4a2acd74509435892823607d966d424bd9ad5d0b00938f27240a1bfa878a
+
+  - name: libayatana-indicator
+    buildsystem: cmake-ninja
+    cleanup:
+      - /include
+      - /lib/pkgconfig
+    sources:
+      - type: git
+        url: https://github.com/AyatanaIndicators/libayatana-indicator.git
+        tag: '0.9.4'
+
+  - name: libayatana-appindicator
+    buildsystem: cmake-ninja
+    config-opts:
+      - -DENABLE_BINDINGS_MONO=NO
+      - -DENABLE_BINDINGS_VALA=NO
+      - -DENABLE_GTKDOC=NO
+    cleanup:
+      - /include
+      - /lib/pkgconfig
+    sources:
+      - type: git
+        url: https://github.com/AyatanaIndicators/libayatana-appindicator.git
+        tag: '0.5.93'
 
   # --- Python dependencies not bundled in the GNOME runtime ---
   # PyGObject and pycairo are already provided by org.gnome.Platform.
