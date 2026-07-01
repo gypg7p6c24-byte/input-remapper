@@ -23,6 +23,10 @@ command: input-remapper-gtk
 finish-args:
   # Force the session-bus / no-pkexec code path inside the sandbox.
   - --env=INPUT_REMAPPER_SESSION_BUS=1
+  # /app/lib/pythonX.Y/site-packages is not on the runtime python path by
+  # default. Point PYTHONPATH at it (cover the likely runtime python versions)
+  # so the bundled inputremapper module and its deps are importable.
+  - --env=PYTHONPATH=/app/lib/python3.13/site-packages:/app/lib/python3.12/site-packages:/app/lib/python3.11/site-packages
   # Display
   - --socket=wayland
   - --socket=fallback-x11
