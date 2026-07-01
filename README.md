@@ -59,8 +59,13 @@ Branch policy for this fork:
 
 SteamOS is immutable, so Input Remapper ships there as a **Flatpak** (one-click,
 survives OS updates) instead of a native package. Per-game presets work for both
-Steam and non-Steam games. See the dedicated guide: **[readme/steamos.md](readme/steamos.md)**
-(packaging details and porting checklist in [install/flatpak/](install/flatpak/README.md)).
+Steam and non-Steam games.
+
+**Download:** [**input-remapper.flatpak**](https://github.com/gypg7p6c24-byte/input-remapper/releases/latest/download/input-remapper.flatpak)
+(latest release) — in Desktop mode, double-click it to install via Discover.
+
+Full guide: **[readme/steamos.md](readme/steamos.md)** · packaging details:
+[install/flatpak/](install/flatpak/README.md).
 
 ### Notes
 

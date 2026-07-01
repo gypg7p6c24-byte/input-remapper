@@ -4,6 +4,21 @@ This page covers installing and using Input Remapper on **SteamOS** (PC or Steam
 Deck) in **Desktop mode (KDE Plasma)**. For Ubuntu, see the main
 [README](../README.md).
 
+## Download
+
+**[Download input-remapper.flatpak](https://github.com/gypg7p6c24-byte/input-remapper/releases/latest/download/input-remapper.flatpak)** (latest release, no GitHub account required).
+
+In Desktop mode, double-click the downloaded file to install it via **Discover**,
+or from a terminal:
+
+```
+flatpak install --user ~/Downloads/input-remapper.flatpak
+```
+
+Then launch **Input Remapper** from the application menu. (This link becomes live
+once a release has been published; until then, grab the bundle from the latest
+**Actions** run's artifacts while logged in to GitHub.)
+
 ## Why this is different from a normal Linux install
 
 SteamOS uses a **read-only, immutable** system. Anything installed into the
