@@ -83,6 +83,9 @@ modules:
   # --- Input Remapper itself (built from this repository) ---
   - name: input-remapper
     buildsystem: simple
+    # Flatpak only exports a desktop entry + icon named after the app-id.
+    rename-desktop-file: input-remapper-gtk.desktop
+    rename-icon: input-remapper
     build-options:
       build-args:
         - --share=network
