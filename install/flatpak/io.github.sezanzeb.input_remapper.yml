@@ -70,6 +70,8 @@ modules:
 
   # --- Tray icon stack (StatusNotifierItem) for KDE Plasma Wayland ---
   # Gtk.StatusIcon is invisible on Wayland; KDE needs SNI via AppIndicator.
+  # Chain: intltool -> libdbusmenu -> ayatana-ido -> libayatana-indicator ->
+  #        libayatana-appindicator.
   # intltool is a build-only tool needed by libdbusmenu; not in the GNOME SDK.
   - name: intltool
     cleanup:
@@ -103,6 +105,16 @@ modules:
       - type: archive
         url: https://launchpad.net/libdbusmenu/16.04/16.04.0/+download/libdbusmenu-16.04.0.tar.gz
         sha256: b9cc4a2acd74509435892823607d966d424bd9ad5d0b00938f27240a1bfa878a
+
+  - name: libayatana-ido
+    buildsystem: cmake-ninja
+    cleanup:
+      - /include
+      - /lib/pkgconfig
+    sources:
+      - type: git
+        url: https://github.com/AyatanaIndicators/ayatana-ido.git
+        tag: '0.10.1'
 
   - name: libayatana-indicator
     buildsystem: cmake-ninja
