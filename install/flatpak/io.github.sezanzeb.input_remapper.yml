@@ -38,9 +38,10 @@ finish-args:
   # Tray icon (StatusNotifier) on the KDE panel
   - --talk-name=org.kde.StatusNotifierWatcher
   - --talk-name=org.freedesktop.Notifications
-  # IPC between the GUI, the reader-service and the injection service (session bus)
+  # The service owns inputremapper.Control on the session bus. IMPORTANT: do NOT
+  # also add --talk-name for this name -- a later talk policy overrides own and
+  # the service then gets AccessDenied on RequestName. own already implies talk.
   - --own-name=inputremapper.Control
-  - --talk-name=inputremapper.Control
   # Run the one-time host device-access helper (udev rule) via flatpak-spawn
   - --talk-name=org.freedesktop.Flatpak
   # Read Steam's installed-game manifests and non-Steam shortcuts so per-game
