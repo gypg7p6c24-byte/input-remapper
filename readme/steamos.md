@@ -6,7 +6,7 @@ Deck) in **Desktop mode (KDE Plasma)**. For Ubuntu, see the main
 
 ## Download
 
-**[Download input-remapper.flatpak](https://github.com/gypg7p6c24-byte/input-remapper/releases/latest/download/input-remapper.flatpak)** (latest release, no GitHub account required).
+**[Download input-remapper.flatpak](https://github.com/gypg7p6c24-byte/input-remapper/releases/download/dev-latest/input-remapper.flatpak)** (rolling dev build, no GitHub account required).
 
 In Desktop mode, double-click the downloaded file to install it via **Discover**,
 or from a terminal:
@@ -15,9 +15,9 @@ or from a terminal:
 flatpak install --user ~/Downloads/input-remapper.flatpak
 ```
 
-Then launch **Input Remapper** from the application menu. (This link becomes live
-once a release has been published; until then, grab the bundle from the latest
-**Actions** run's artifacts while logged in to GitHub.)
+Then launch **Input Remapper** from the application menu. Every push to the `dev`
+branch republishes this file automatically (the `dev-latest` release), so the
+link always serves the newest build.
 
 ## Why this is different from a normal Linux install
 
@@ -50,7 +50,7 @@ rule. **Your presets are always kept** unless you explicitly ask to remove them.
 Build/packaging details and the current porting checklist are in
 [`install/flatpak/README.md`](../install/flatpak/README.md).
 
-End-user flow once published: open the bundle / Discover entry → **Install** →
+End-user flow: download the bundle → double-click → **Install** in Discover →
 first launch asks for your password once to enable device access → done. The
 app lives in the tray; closing the window keeps it running, "Quit" from the
 tray stops it.
@@ -81,10 +81,9 @@ and close games.
 
 The in-app updater supports release **channels** (stable / dev) from the GitHub
 repo and, on SteamOS, offers the matching **Flatpak** bundle instead of the
-`.deb`.
+`.deb`. The dev channel tracks the `dev-latest` release published by CI.
 
 ## Status
 
 The Flatpak packaging is being finalised and iterated on-device. See the porting
-checklist in [`install/flatpak/README.md`](../install/flatpak/README.md). Report
-issues with the first build error and we adapt from there.
+checklist in [`install/flatpak/README.md`](../install/flatpak/README.md).
