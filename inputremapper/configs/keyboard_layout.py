@@ -86,8 +86,12 @@ class KeyboardLayout:
         # only if not e.g. both "a" and "A" are in the mapping
         return self._case_insensitive_mapping.get(symbol.lower(), symbol)
 
-    def _use_xmodmap_symbols(self):
-        """Look up xmodmap -pke, write xmodmap.json, and get the symbols."""
+    def _use_xmodmap_symbols(self) -> bool:
+        """Look up xmodmap -pke, write xmodmap.json, and get the symbols.
+
+        Returns True if any symbol was added, False otherwise (e.g. xmodmap is
+        not installed or there is no X server, which is the case on Wayland).
+        """
         try:
             xmodmap = subprocess.check_output(
                 ["xmodmap", "-pke"],
@@ -95,27 +99,88 @@ class KeyboardLayout:
             ).decode()
         except FileNotFoundError:
             logger.info("Optional `xmodmap` command not found. This is not critical.")
-            return
+            return False
         except subprocess.CalledProcessError as e:
             logger.error('Call to `xmodmap -pke` failed with "%s"', e)
-            return
+            return False
 
         self._xmodmap = re.findall(r"(\d+) = (.+)\n", xmodmap + "\n")
         xmodmap_dict = self._find_legit_mappings()
         if len(xmodmap_dict) == 0:
             logger.info("`xmodmap -pke` did not yield any symbol")
-            return
+            return False
 
-        # Write this stuff into the input-remapper config directory, because
-        # the systemd service won't know the user sessions xmodmap.
+        self._write_symbols_cache(xmodmap_dict)
+
+        for name, code in xmodmap_dict.items():
+            self._set(name, code)
+
+        return True
+
+    def _use_gdk_symbols(self) -> bool:
+        """Read the keyboard layout from GTK's keymap (Wayland fallback).
+
+        On Wayland there is no X server and `xmodmap` is unavailable, but GTK has
+        already loaded the compositor's keyboard layout. Gdk.Keymap can therefore
+        translate hardware keycodes into keysym names (e.g. "z", "space") for the
+        user's actual layout, which is exactly what xmodmap provided. Also writes
+        xmodmap.json so the background service knows the symbols too.
+        """
+        try:
+            import gi
+
+            gi.require_version("Gdk", "3.0")
+            from gi.repository import Gdk
+        except (ImportError, ValueError) as error:
+            logger.info("Gdk not available for keyboard layout lookup: %s", error)
+            return False
+
+        display = Gdk.Display.get_default()
+        if display is None:
+            logger.info("No Gdk display available to read the keyboard layout")
+            return False
+
+        keymap = Gdk.Keymap.get_for_display(display)
+        if keymap is None:
+            return False
+
+        symbols: dict = {}
+        for keycode in range(XKB_KEYCODE_OFFSET, 256):
+            try:
+                found, _keys, keyvals = keymap.get_entries_for_keycode(keycode)
+            except Exception:
+                continue
+            if not found or not keyvals:
+                continue
+            evdev_code = keycode - XKB_KEYCODE_OFFSET
+            for keyval in keyvals:
+                if not keyval:
+                    continue
+                name = Gdk.keyval_name(keyval)
+                if name:
+                    # keep the first (base level) symbol seen for each name
+                    symbols.setdefault(name, evdev_code)
+
+        if not symbols:
+            logger.info("Gdk keymap did not yield any symbol")
+            return False
+
+        self._write_symbols_cache(symbols)
+
+        for name, code in symbols.items():
+            self._set(name, code)
+
+        logger.info("Loaded %d keyboard symbols from Gdk", len(symbols))
+        return True
+
+    def _write_symbols_cache(self, symbols: dict) -> None:
+        """Persist name->code so the systemd service knows the session symbols."""
+        # The service that runs via systemd can't read the user session's layout.
         path = PathUtils.get_config_path(XMODMAP_FILENAME)
         PathUtils.touch(path)
         with open(path, "w") as file:
             logger.debug('Writing "%s"', path)
-            json.dump(xmodmap_dict, file, indent=4)
-
-        for name, code in xmodmap_dict.items():
-            self._set(name, code)
+            json.dump(symbols, file, indent=4)
 
     def _use_linux_evdev_symbols(self):
         """Look up the evdev constant names and use them."""
@@ -131,7 +196,9 @@ class KeyboardLayout:
         if not is_service():
             # xmodmap is only available from within the login session.
             # The service that runs via systemd can't use this.
-            self._use_xmodmap_symbols()
+            # On Wayland xmodmap is unavailable; fall back to GTK's keymap.
+            if not self._use_xmodmap_symbols():
+                self._use_gdk_symbols()
 
         self._use_linux_evdev_symbols()
 
