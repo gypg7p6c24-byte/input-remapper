@@ -83,9 +83,6 @@ modules:
   # --- Input Remapper itself (built from this repository) ---
   - name: input-remapper
     buildsystem: simple
-    # Flatpak only exports a desktop entry + icon named after the app-id.
-    rename-desktop-file: input-remapper-gtk.desktop
-    rename-icon: input-remapper
     build-options:
       build-args:
         - --share=network
@@ -100,6 +97,11 @@ modules:
       - 'cp -a ${FLATPAK_DEST}/app/. ${FLATPAK_DEST}/ 2>/dev/null || true'
       - 'rm -rf ${FLATPAK_DEST}/app'
       - 'sed -i "s|/usr/share/input-remapper|/app/share/input-remapper|g" ${FLATPAK_DEST}/lib/python*/site-packages/inputremapper/installation_info.py || true'
+      # Flatpak only exports a desktop entry + icon named exactly after the
+      # app-id. Rename them explicitly (no || true: fail loudly if missing).
+      - 'mv ${FLATPAK_DEST}/share/applications/input-remapper-gtk.desktop ${FLATPAK_DEST}/share/applications/${FLATPAK_ID}.desktop'
+      - 'sed -i "s/^Icon=.*/Icon=${FLATPAK_ID}/" ${FLATPAK_DEST}/share/applications/${FLATPAK_ID}.desktop'
+      - 'mv ${FLATPAK_DEST}/share/icons/hicolor/scalable/apps/input-remapper.svg ${FLATPAK_DEST}/share/icons/hicolor/scalable/apps/${FLATPAK_ID}.svg'
       # Ship the host device-access helper (run via flatpak-spawn --host pkexec).
       - install -Dm755 install/flatpak/host/input-remapper-device-access ${FLATPAK_DEST}/bin/input-remapper-device-access
     sources:
