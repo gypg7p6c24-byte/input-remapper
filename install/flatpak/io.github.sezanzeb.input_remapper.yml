@@ -105,6 +105,10 @@ modules:
       # appstreamcli compose needs a raster icon it can read (the SVG is sized
       # in millimetres and fails to rasterise). Ship the 128x128 PNG too.
       - 'install -Dm644 data/input-remapper-large.png ${FLATPAK_DEST}/share/icons/hicolor/128x128/apps/${FLATPAK_ID}.png'
+      # The metainfo's <launchable> still points at the old desktop filename;
+      # update it to the renamed one so appstreamcli can resolve the desktop
+      # file (and thus the icon), otherwise the build fails gui-app-without-icon.
+      - 'sed -i "s|input-remapper-gtk.desktop|${FLATPAK_ID}.desktop|" ${FLATPAK_DEST}/share/metainfo/${FLATPAK_ID}.metainfo.xml'
       # Ship the host device-access helper (run via flatpak-spawn --host pkexec).
       - install -Dm755 install/flatpak/host/input-remapper-device-access ${FLATPAK_DEST}/bin/input-remapper-device-access
     sources:
