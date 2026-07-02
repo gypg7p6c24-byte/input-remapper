@@ -143,19 +143,25 @@ class TrayIcon:
         self._menu.append(self._item_quit)
         self._menu.show_all()
 
+        # The tray host (e.g. KDE on Wayland) resolves the icon name against the
+        # *host* icon theme. Inside a Flatpak only the app-id-named icon is
+        # exported to the host, so use FLATPAK_ID there; "input-remapper"
+        # otherwise (native installs ship that icon name system-wide).
+        icon_name = os.environ.get("FLATPAK_ID", "input-remapper")
+
         if APPINDICATOR_AVAILABLE:
             self._indicator = AppIndicator.Indicator.new(
                 "input-remapper",
-                "input-remapper",
+                icon_name,
                 AppIndicator.IndicatorCategory.APPLICATION_STATUS,
             )
             self._indicator.set_status(AppIndicator.IndicatorStatus.ACTIVE)
-            self._indicator.set_icon_full("input-remapper", "input-remapper")
+            self._indicator.set_icon_full(icon_name, "input-remapper")
             self._indicator.set_menu(self._menu)
-            logger.info("Tray backend: %s", APPINDICATOR_NAMESPACE)
+            logger.info("Tray backend: %s (icon %s)", APPINDICATOR_NAMESPACE, icon_name)
         else:
             self._icon = Gtk.StatusIcon()
-            self._icon.set_from_icon_name("input-remapper")
+            self._icon.set_from_icon_name(icon_name)
             self._icon.set_tooltip_text("input-remapper")
             self._icon.connect("activate", self._on_activate)
             self._icon.connect("popup-menu", self._on_popup_menu)
@@ -173,6 +179,7 @@ class TrayIcon:
 
     def _on_quit(self, *_):
         self._ui.controller.close()
+
 
 class UserInterface:
     """The input-remapper gtk window."""
