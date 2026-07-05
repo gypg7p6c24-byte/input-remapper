@@ -109,7 +109,7 @@ from inputremapper.update_service import (
     fetch_release,
     release_page_for_channel,
 )
-from inputremapper.user import UserUtils
+from inputremapper.user import UserUtils, is_flatpak
 
 # https://cjenkins.wordpress.com/2012/05/08/use-gtksourceview-widget-in-glade/
 GObject.type_register(GtkSource.View)
@@ -555,6 +555,12 @@ class UserInterface:
         except UpdateError as error:
             GLib.idle_add(self._on_update_check_failed, channel, str(error))
             return
+        except Exception as error:
+            # Don't let an unexpected exception kill the thread silently and
+            # leave the UI stuck on "Checking for updates...".
+            logger.error("Update check crashed: %s", error, exc_info=True)
+            GLib.idle_add(self._on_update_check_failed, channel, str(error))
+            return
 
         GLib.idle_add(self._on_update_check_complete, release)
 
@@ -607,25 +613,62 @@ class UserInterface:
         ).start()
 
     def _install_update_worker(self, release: UpdateRelease) -> None:
+        # Catch everything: an uncaught exception would silently kill this
+        # daemon thread and leave the UI stuck on "Downloading update package...".
         try:
-            package_path = download_release_asset(release)
+            self._install_update(release)
         except UpdateError as error:
             GLib.idle_add(self._on_update_install_failed, release.channel, str(error))
-            return
+        except Exception as error:
+            logger.error("Update install crashed: %s", error, exc_info=True)
+            GLib.idle_add(self._on_update_install_failed, release.channel, str(error))
 
-        env = os.environ.copy()
-        env.update(monitor_env_vars())
-        exit_code = subprocess.call(
-            [
+    def _install_update(self, release: UpdateRelease) -> None:
+        if is_flatpak():
+            # pkexec and apt do not exist inside the sandbox. Download the
+            # bundle into a host-visible directory (granted via
+            # --filesystem=~/.config/input-remapper-2) and let the host's
+            # flatpak install it via the portal (--talk-name=org.freedesktop.Flatpak).
+            download_dir = os.path.join(
+                UserUtils.home, ".config", "input-remapper-2", "updates"
+            )
+            package_path = download_release_asset(release, dest_dir=download_dir)
+            command = [
+                "flatpak-spawn",
+                "--host",
+                "flatpak",
+                "install",
+                "--user",
+                "--noninteractive",
+                "--reinstall",
+                "-y",
+                package_path,
+            ]
+            env = os.environ.copy()
+        else:
+            package_path = download_release_asset(release)
+            command = [
                 "pkexec",
                 "input-remapper-control",
                 "--command",
                 "install-package",
                 "--package-path",
                 package_path,
-            ],
-            env=env,
-        )
+            ]
+            env = os.environ.copy()
+            env.update(monitor_env_vars())
+
+        logger.info("Installing update via `%s`", " ".join(command))
+        exit_code = subprocess.call(command, env=env)
+
+        if is_flatpak():
+            # The native path (apt) removes the .deb itself; clean up the
+            # bundle here in the flatpak path.
+            try:
+                os.remove(package_path)
+            except OSError:
+                pass
+
         if exit_code != 0:
             GLib.idle_add(
                 self._on_update_install_failed,

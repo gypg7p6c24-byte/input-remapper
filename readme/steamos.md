@@ -6,18 +6,19 @@ Deck) in **Desktop mode (KDE Plasma)**. For Ubuntu, see the main
 
 ## Download
 
-**[Download input-remapper.flatpak](https://github.com/gypg7p6c24-byte/input-remapper/releases/download/dev-latest/input-remapper.flatpak)** (rolling dev build, no GitHub account required).
+**[Download input-remapper-&lt;version&gt;.flatpak](https://github.com/gypg7p6c24-byte/input-remapper/releases/tag/dev-latest)** (rolling dev build, no GitHub account required).
 
 In Desktop mode, double-click the downloaded file to install it via **Discover**,
 or from a terminal:
 
 ```
-flatpak install --user ~/Downloads/input-remapper.flatpak
+flatpak install --user ~/Downloads/input-remapper-*.flatpak
 ```
 
 Then launch **Input Remapper** from the application menu. Every push to the `dev`
 branch republishes this file automatically (the `dev-latest` release), so the
-link always serves the newest build.
+link always serves the newest build. Once installed, the app can update itself
+from Settings (the update downloads the new bundle and installs it on the host).
 
 ## Why this is different from a normal Linux install
 
