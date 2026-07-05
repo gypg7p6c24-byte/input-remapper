@@ -245,5 +245,9 @@ class EventReader:
         try:
             await self.handle(event)
         except Exception as e:
-            logger.error("Handling event %s failed with %s", event, type(e))
+            # exc_info=True also writes the traceback into the log file
+            # (pilot monitor); stderr alone is lost on SteamOS.
+            logger.error(
+                "Handling event %s failed with %s", event, type(e), exc_info=True
+            )
             traceback.print_exception(e)

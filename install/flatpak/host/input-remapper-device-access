@@ -13,7 +13,7 @@
 #   flatpak-spawn --host pkexec \
 #       /path/to/input-remapper-device-access enable "$USER"
 #
-# Usage: input-remapper-device-access {enable|disable} [user]
+# Usage: input-remapper-device-access {enable|disable|set-polkit-enable|set-polkit-disable} [user]
 set -euo pipefail
 
 RULE="/etc/udev/rules.d/99-input-remapper-uinput.rules"
@@ -57,8 +57,34 @@ EOF
         reload_udev
         echo "Device access disabled (group membership left untouched)."
         ;;
+    # Same polkit rule as native installs (Settings -> autostart). On SteamOS
+    # this mostly acts as an authenticated, persistent consent marker for
+    # running in the background; the password prompt is intentional.
+    set-polkit-enable)
+        if [ -z "$TARGET_USER" ]; then
+            echo "set-polkit-enable requires a user argument." >&2
+            exit 2
+        fi
+        mkdir -p /etc/polkit-1/rules.d
+        cat > "/etc/polkit-1/rules.d/90-input-remapper-${TARGET_USER}.rules" <<EOF
+polkit.addRule(function(action, subject) {
+  if (action.id == "inputremapper" && subject.user == "${TARGET_USER}" && subject.active) {
+    return polkit.Result.YES;
+  }
+});
+EOF
+        echo "Polkit rule installed for ${TARGET_USER}."
+        ;;
+    set-polkit-disable)
+        if [ -z "$TARGET_USER" ]; then
+            echo "set-polkit-disable requires a user argument." >&2
+            exit 2
+        fi
+        rm -f "/etc/polkit-1/rules.d/90-input-remapper-${TARGET_USER}.rules"
+        echo "Polkit rule removed for ${TARGET_USER}."
+        ;;
     *)
-        echo "Usage: $0 {enable|disable} [user]" >&2
+        echo "Usage: $0 {enable|disable|set-polkit-enable|set-polkit-disable} [user]" >&2
         exit 2
         ;;
 esac

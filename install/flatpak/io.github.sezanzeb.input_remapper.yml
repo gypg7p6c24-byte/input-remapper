@@ -51,6 +51,8 @@ finish-args:
   - --filesystem=/run/media:ro
   # Persist presets and config under the host home (kept on uninstall by default)
   - --filesystem=~/.config/input-remapper-2:create
+  # Write the login autostart entry (Settings -> autostart / auto-hidden)
+  - --filesystem=~/.config/autostart:create
 
 modules:
   # --- GtkSourceView 4 (the GNOME 47 runtime ships v5; the editor uses v4) ---
@@ -176,12 +178,43 @@ modules:
       # appstreamcli compose needs a raster icon it can read (the SVG is sized
       # in millimetres and fails to rasterise). Ship the 128x128 PNG too.
       - 'install -Dm644 data/input-remapper-large.png ${FLATPAK_DEST}/share/icons/hicolor/128x128/apps/${FLATPAK_ID}.png'
+      # Standard tray sizes so the Plasma system tray does not have to scale
+      # the scalable SVG itself (avoids padding/spacing artifacts). Rendered
+      # at build time with the runtime's librsvg.
+      - |
+        python3 - <<'PYEOF'
+        import os
+        import gi
+        gi.require_version("Rsvg", "2.0")
+        from gi.repository import Rsvg
+        import cairo
+
+        svg = Rsvg.Handle.new_from_file("data/input-remapper.svg")
+        dest_root = os.environ["FLATPAK_DEST"]
+        app_id = os.environ["FLATPAK_ID"]
+        for size in (22, 24, 32, 48):
+            surface = cairo.ImageSurface(cairo.FORMAT_ARGB32, size, size)
+            context = cairo.Context(surface)
+            rect = Rsvg.Rectangle()
+            rect.x = rect.y = 0
+            rect.width = rect.height = size
+            svg.render_document(context, rect)
+            dest = os.path.join(
+                dest_root, f"share/icons/hicolor/{size}x{size}/apps/{app_id}.png"
+            )
+            os.makedirs(os.path.dirname(dest), exist_ok=True)
+            surface.write_to_png(dest)
+            print("icon", dest)
+        PYEOF
       # The metainfo's <launchable> still points at the old desktop filename;
       # update it to the renamed one so appstreamcli can resolve the desktop
       # file (and thus the icon), otherwise the build fails gui-app-without-icon.
       - 'sed -i "s|input-remapper-gtk.desktop|${FLATPAK_ID}.desktop|" ${FLATPAK_DEST}/share/metainfo/${FLATPAK_ID}.metainfo.xml'
       # Ship the host device-access helper (run via flatpak-spawn --host pkexec).
       - install -Dm755 install/flatpak/host/input-remapper-device-access ${FLATPAK_DEST}/bin/input-remapper-device-access
+      # Ship the host game-scan helper (run unprivileged via flatpak-spawn --host)
+      # for the game auto-switcher: the sandbox cannot see host processes.
+      - install -Dm755 install/flatpak/host/input-remapper-game-scan ${FLATPAK_DEST}/bin/input-remapper-game-scan
     sources:
       - type: git
         url: https://github.com/gypg7p6c24-byte/input-remapper.git
