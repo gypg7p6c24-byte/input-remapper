@@ -1,0 +1,102 @@
+#!/usr/bin/env python3
+"""Host-side process scan for the Input Remapper Flatpak game auto-switcher.
+
+The sandbox has its own PID namespace, so /proc inside the Flatpak never shows
+Steam or the games running on the host. This unprivileged helper runs on the
+host (via `flatpak-spawn --host`), scans /proc for processes of the current
+user that look Steam-related, and prints them as JSON on stdout. The matching
+against installed games and shortcuts stays inside the app
+(SteamProcessWatcher in inputremapper/gui/components/editor.py).
+
+Output: JSON list of {"pid", "exe", "cwd", "cmdline", "env"} where "env" only
+contains Steam-related keys (never the full environment).
+"""
+
+import json
+import os
+import sys
+
+STEAM_ENV_KEYS = (
+    "SteamAppId",
+    "SteamAppID",
+    "STEAM_APP_ID",
+    "SteamGameId",
+    "STEAM_COMPAT_APP_ID",
+    "SteamOverlayGameId",
+)
+
+
+def _readlink(path):
+    try:
+        return os.readlink(path)
+    except OSError:
+        return ""
+
+
+def _read_cmdline(pid):
+    try:
+        with open(f"/proc/{pid}/cmdline", "rb") as handle:
+            raw = handle.read().split(b"\0")
+        return [item.decode("utf-8", "ignore") for item in raw if item]
+    except OSError:
+        return []
+
+
+def _read_steam_env(pid):
+    try:
+        with open(f"/proc/{pid}/environ", "rb") as handle:
+            raw = handle.read().split(b"\0")
+    except OSError:
+        return {}
+    env = {}
+    for item in raw:
+        if b"=" not in item:
+            continue
+        key, value = item.split(b"=", 1)
+        key = key.decode("utf-8", "ignore")
+        if key in STEAM_ENV_KEYS:
+            env[key] = value.decode("utf-8", "ignore")
+    return env
+
+
+def _is_interesting(exe, cwd, cmdline, env):
+    if env:
+        return True
+    haystack = " ".join([exe, cwd] + cmdline).lower()
+    if "steamapps" in haystack:
+        return True
+    # Non-Steam shortcuts commonly launch through `flatpak run <app-id>`.
+    if "flatpak" in haystack and "run" in cmdline:
+        return True
+    return False
+
+
+def main():
+    uid = os.getuid()
+    own_pid = os.getpid()
+    entries = []
+    for name in os.listdir("/proc"):
+        if not name.isdigit():
+            continue
+        pid = int(name)
+        if pid == own_pid:
+            continue
+        try:
+            if os.stat(f"/proc/{pid}").st_uid != uid:
+                continue
+        except OSError:
+            continue
+        exe = _readlink(f"/proc/{pid}/exe")
+        cwd = _readlink(f"/proc/{pid}/cwd")
+        cmdline = _read_cmdline(pid)
+        env = _read_steam_env(pid)
+        if not _is_interesting(exe, cwd, cmdline, env):
+            continue
+        entries.append(
+            {"pid": pid, "exe": exe, "cwd": cwd, "cmdline": cmdline, "env": env}
+        )
+    json.dump(entries, sys.stdout)
+
+
+if __name__ == "__main__":
+    main()

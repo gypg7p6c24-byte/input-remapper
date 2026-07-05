@@ -76,6 +76,33 @@ def is_flatpak() -> bool:
     return os.path.exists("/.flatpak-info")
 
 
+def flatpak_host_app_path() -> str:
+    """Host filesystem path of the sandbox's /app (from /.flatpak-info).
+
+    Used to locate the shipped host helpers (bin/input-remapper-game-scan,
+    bin/input-remapper-device-access) when invoking them on the host through
+    `flatpak-spawn --host`. Returns "" outside of a Flatpak.
+    """
+    if not is_flatpak():
+        return ""
+    import configparser
+
+    parser = configparser.ConfigParser(interpolation=None)
+    try:
+        parser.read("/.flatpak-info")
+        return parser.get("Instance", "app-path", fallback="")
+    except Exception:
+        return ""
+
+
+def flatpak_host_helper(name: str) -> str:
+    """Host path of a helper shipped in the Flatpak's bin directory."""
+    app_path = flatpak_host_app_path()
+    if not app_path:
+        return ""
+    return os.path.join(app_path, "bin", name)
+
+
 def session_bus_enabled() -> bool:
     """Use the per-user session bus instead of the system bus.
 
