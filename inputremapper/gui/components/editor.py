@@ -38,8 +38,11 @@ from evdev.ecodes import (
     BTN_EXTRA,
     BTN_SIDE,
 )
+import json
 import os
 import re
+import subprocess
+import threading
 
 from gi.repository import Gtk, GtkSource, Gdk, GLib
 
@@ -61,6 +64,7 @@ from inputremapper.gui.messages.message_data import (
 )
 from inputremapper.gui.utils import HandlerDisabled, Colors, debounce
 from inputremapper.logging.logger import logger, monitor_debug
+from inputremapper.user import is_flatpak, flatpak_host_helper
 from inputremapper.injection.mapping_handlers.axis_transform import Transformation
 from inputremapper.input_event import InputEvent
 from inputremapper.utils import (
@@ -793,7 +797,15 @@ class SteamProcessWatcher:
             "init shortcuts",
             {"count": len(self._shortcuts), "shortcuts": self._shortcuts},
         )
-        GLib.timeout_add(1000, self._poll)
+        self._host_scan_running = False
+        if is_flatpak():
+            # /proc inside the sandbox has its own PID namespace and never
+            # shows Steam or the games running on the host. Scan the host
+            # through flatpak-spawn instead (slightly slower, so poll less
+            # often and off the main thread).
+            GLib.timeout_add(3000, self._poll_host)
+        else:
+            GLib.timeout_add(1000, self._poll)
 
     def _log_debug(self, message: str, *args):
         logger.debug("GAME_WATCHER_DEBUG " + message, *args)
@@ -814,6 +826,56 @@ class SteamProcessWatcher:
             info = self._inspect_pid(pid)
             if info.get("matches"):
                 hits.append(info)
+        self._process_hits(hits)
+        return True
+
+    def _poll_host(self):
+        # Only one host scan at a time; skip the tick if one is in flight.
+        if self._host_scan_running:
+            return True
+        self._host_scan_running = True
+        self._ticks += 1
+        threading.Thread(target=self._host_scan_worker, daemon=True).start()
+        return True
+
+    def _host_scan_worker(self):
+        try:
+            entries = self._run_host_game_scan()
+            hits = []
+            for entry in entries:
+                info = self._build_info(
+                    entry.get("pid"),
+                    entry.get("exe") or "",
+                    entry.get("cwd") or "",
+                    entry.get("cmdline") or [],
+                    entry.get("env") or {},
+                )
+                if info.get("matches"):
+                    hits.append(info)
+            # Deliver on the main thread; idle_add drops the source when the
+            # callback returns None/False.
+            GLib.idle_add(self._process_hits, hits)
+        except Exception as exc:
+            self._log_debug_kv("host scan error", {"error": exc})
+        finally:
+            self._host_scan_running = False
+
+    def _run_host_game_scan(self) -> list:
+        helper = flatpak_host_helper("input-remapper-game-scan")
+        if not helper:
+            raise RuntimeError("host helper path not found in /.flatpak-info")
+        result = subprocess.run(
+            ["flatpak-spawn", "--host", helper],
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+        if result.returncode != 0:
+            message = (result.stderr or "").strip()[:200]
+            raise RuntimeError(message or f"exit code {result.returncode}")
+        return json.loads(result.stdout or "[]")
+
+    def _process_hits(self, hits: List[dict]):
         current_appids = sorted(
             {
                 match["appid"]
@@ -841,7 +903,9 @@ class SteamProcessWatcher:
                     self._on_change(current_appids)
                 except Exception as exc:
                     self._log_debug_kv("callback error", {"error": exc})
-        return True
+        # Must not return True: when scheduled through GLib.idle_add this
+        # would keep the idle source alive forever.
+        return False
 
     def get_hits(self) -> List[dict]:
         return self._last_hits
@@ -983,6 +1047,12 @@ class SteamProcessWatcher:
         cwd = self._safe_readlink(f"/proc/{pid}/cwd")
         cmdline = self._safe_read_cmdline(f"/proc/{pid}/cmdline")
         env = self._safe_read_environ(f"/proc/{pid}/environ")
+        return self._build_info(pid, exe, cwd, cmdline, env)
+
+    def _build_info(
+        self, pid, exe: str, cwd: str, cmdline: list, env: dict
+    ) -> dict:
+        """Match one process (local or host-scanned) against known games."""
         matches = []
         cmd_text = " ".join(cmdline)
 
