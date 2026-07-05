@@ -30,6 +30,8 @@ from dataclasses import dataclass
 from typing import Any
 from urllib import error, request
 
+from inputremapper.user import is_flatpak
+
 GITHUB_OWNER = "gypg7p6c24-byte"
 GITHUB_REPO = "input-remapper"
 RELEASES_BASE_URL = f"https://github.com/{GITHUB_OWNER}/{GITHUB_REPO}/releases"
@@ -39,6 +41,7 @@ CHANNEL_RELEASE_TAGS = {
     "dev": "dev-latest",
 }
 DEBIAN_VERSION_RE = re.compile(r"^input-remapper-(?P<version>.+)\.deb$")
+FLATPAK_VERSION_RE = re.compile(r"^input-remapper-(?P<version>.+)\.(?:flatpak|flatpakref)$")
 VERSION_RE = re.compile(r"^(?P<major>\d+)\.(?P<minor>\d+)\.(?P<patch>\d+)(?:\.dev(?P<dev>\d+))?$")
 
 
@@ -134,10 +137,17 @@ def _http_get_json(url: str) -> dict[str, Any]:
 
 
 def _asset_version_from_name(asset_name: str) -> str | None:
-    match = DEBIAN_VERSION_RE.match(asset_name)
+    match = DEBIAN_VERSION_RE.match(asset_name) or FLATPAK_VERSION_RE.match(asset_name)
     if not match:
         return None
     return match.group("version")
+
+
+def _preferred_asset_suffixes() -> tuple[str, ...]:
+    """On SteamOS/Flatpak prefer the .flatpak bundle; otherwise the .deb."""
+    if is_flatpak():
+        return (".flatpak", ".flatpakref", ".deb")
+    return (".deb",)
 
 
 def fetch_release(channel: str) -> UpdateRelease:
@@ -145,42 +155,56 @@ def fetch_release(channel: str) -> UpdateRelease:
     tag = release_tag_for_channel(channel)
     payload = _http_get_json(f"{GITHUB_API_BASE_URL}/releases/tags/{tag}")
     assets = payload.get("assets", [])
-    deb_asset = next(
-        (
-            asset
-            for asset in assets
-            if isinstance(asset, dict)
-            and str(asset.get("name", "")).endswith(".deb")
-            and asset.get("browser_download_url")
-        ),
-        None,
-    )
-    if deb_asset is None:
-        raise UpdateError(f"No .deb asset found for channel {channel}")
 
-    asset_name = str(deb_asset["name"])
+    selected = None
+    for suffix in _preferred_asset_suffixes():
+        selected = next(
+            (
+                asset
+                for asset in assets
+                if isinstance(asset, dict)
+                and str(asset.get("name", "")).endswith(suffix)
+                and asset.get("browser_download_url")
+            ),
+            None,
+        )
+        if selected is not None:
+            break
+    if selected is None:
+        wanted = "/".join(_preferred_asset_suffixes())
+        raise UpdateError(f"No {wanted} asset found for channel {channel}")
+
+    asset_name = str(selected["name"])
     debian_version = _asset_version_from_name(asset_name)
     if not debian_version:
         raise UpdateError(f"Cannot parse package version from asset {asset_name}")
 
-    display_version = str(payload.get("name") or normalize_version(debian_version))
+    # Prefer the release title as displayed version, but only when it is an
+    # actual version ("2.3.1.dev1"); marketing titles fall back to the
+    # version parsed from the asset name.
+    release_name = str(payload.get("name") or "")
+    if parse_version(release_name) is not None:
+        display_version = normalize_version(release_name)
+    else:
+        display_version = normalize_version(debian_version)
     return UpdateRelease(
         channel=channel,
         version=display_version,
         debian_version=debian_version,
         release_url=str(payload.get("html_url") or release_page_for_channel(channel)),
         asset_name=asset_name,
-        asset_url=str(deb_asset["browser_download_url"]),
+        asset_url=str(selected["browser_download_url"]),
     )
 
 
 def download_release_asset(release: UpdateRelease, dest_dir: str | None = None) -> str:
-    """Download the .deb asset and return the local path."""
+    """Download the release asset (.deb or .flatpak) and return the local path."""
     target_dir = dest_dir or tempfile.gettempdir()
     os.makedirs(target_dir, exist_ok=True)
+    _, suffix = os.path.splitext(release.asset_name)
     with tempfile.NamedTemporaryFile(
         prefix=f"input-remapper-{release.channel}-",
-        suffix=".deb",
+        suffix=suffix or ".deb",
         dir=target_dir,
         delete=False,
     ) as handle:

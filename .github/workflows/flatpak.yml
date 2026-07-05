@@ -32,10 +32,18 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # The in-app updater parses the version from the asset name
+      # (input-remapper-<version>.flatpak, see inputremapper/update_service.py),
+      # so the bundle must be named with the pyproject version.
+      - name: Resolve app version
+        run: |
+          APP_VERSION="$(sed -n 's/^version = "\(.*\)"/\1/p' pyproject.toml | head -n1)"
+          echo "APP_VERSION=${APP_VERSION}" >> "$GITHUB_ENV"
+
       - name: Build Flatpak bundle
         uses: flatpak/flatpak-github-actions/flatpak-builder@v6
         with:
-          bundle: input-remapper.flatpak
+          bundle: input-remapper-${{ env.APP_VERSION }}.flatpak
           manifest-path: install/flatpak/io.github.sezanzeb.input_remapper.yml
           cache-key: flatpak-builder-${{ github.sha }}
 
@@ -44,19 +52,21 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           tag_name: dev-latest
-          name: Input Remapper — dev (Flatpak, SteamOS)
+          # The release title doubles as the displayed version in the in-app
+          # updater, keep it parseable (same convention as channel-release.yml).
+          name: ${{ env.APP_VERSION }}
           prerelease: true
-          files: input-remapper.flatpak
+          files: input-remapper-${{ env.APP_VERSION }}.flatpak
           body: |
             Rolling development build of the SteamOS / Steam Deck Flatpak bundle.
             Built from commit ${{ github.sha }}.
 
-            Download `input-remapper.flatpak` below and double-click it (Discover)
-            to install, in Desktop mode. See
+            Download `input-remapper-${{ env.APP_VERSION }}.flatpak` below and
+            double-click it (Discover) to install, in Desktop mode. See
             [readme/steamos.md](https://github.com/gypg7p6c24-byte/input-remapper/blob/dev/readme/steamos.md).
 
       - name: Attach bundle to tagged release
         if: startsWith(github.ref, 'refs/tags/v')
         uses: softprops/action-gh-release@v2
         with:
-          files: input-remapper.flatpak
+          files: input-remapper-${{ env.APP_VERSION }}.flatpak
