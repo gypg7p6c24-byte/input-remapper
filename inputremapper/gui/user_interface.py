@@ -109,7 +109,7 @@ from inputremapper.update_service import (
     fetch_release,
     release_page_for_channel,
 )
-from inputremapper.user import UserUtils, is_flatpak
+from inputremapper.user import UserUtils, is_flatpak, flatpak_host_helper
 
 # https://cjenkins.wordpress.com/2012/05/08/use-gtksourceview-widget-in-glade/
 GObject.type_register(GtkSource.View)
@@ -1063,7 +1063,21 @@ class UserInterface:
 
     def get_background_permission_enabled(self) -> bool:
         path = self._polkit_rule_path()
-        rule_present = os.path.isfile(path)
+        if is_flatpak():
+            # The host's /etc is not visible from the sandbox; check there.
+            try:
+                rule_present = (
+                    subprocess.call(
+                        ["flatpak-spawn", "--host", "test", "-f", path],
+                        stdout=subprocess.DEVNULL,
+                        stderr=subprocess.DEVNULL,
+                    )
+                    == 0
+                )
+            except Exception:
+                rule_present = False
+        else:
+            rule_present = os.path.isfile(path)
         pkcheck_allowed = self._background_permission_allowed_non_interactive()
         enabled = rule_present or pkcheck_allowed
         logger.info(
@@ -1079,14 +1093,31 @@ class UserInterface:
     def set_background_permission_enabled(self, enabled: bool) -> bool:
         action = "enable" if enabled else "disable"
         logger.info("Requesting background permission action=%s", action)
-        cmd = [
-            "pkexec",
-            "input-remapper-control",
-            "--command",
-            "set-polkit",
-            "--polkit",
-            action,
-        ]
+        if is_flatpak():
+            # pkexec does not exist in the sandbox: authenticate on the host
+            # through the shipped helper. The password prompt is intentional
+            # (explicit consent for background automation).
+            helper = flatpak_host_helper("input-remapper-device-access")
+            if not helper:
+                logger.warning("Host helper path not found, cannot set polkit rule")
+                return False
+            cmd = [
+                "flatpak-spawn",
+                "--host",
+                "pkexec",
+                helper,
+                f"set-polkit-{action}",
+                UserUtils.user,
+            ]
+        else:
+            cmd = [
+                "pkexec",
+                "input-remapper-control",
+                "--command",
+                "set-polkit",
+                "--polkit",
+                action,
+            ]
         env = os.environ.copy()
         env.update(monitor_env_vars())
         exit_code = subprocess.call(cmd, env=env)
@@ -1152,15 +1183,30 @@ class UserInterface:
             return False
 
     def _write_autostart_file(self, path: str, enabled: bool, hidden: bool) -> None:
-        exec_cmd = "input-remapper-gtk"
-        if hidden:
-            exec_cmd = "env INPUT_REMAPPER_START_HIDDEN=1 input-remapper-gtk"
+        if is_flatpak():
+            # The .desktop file is executed by the host session at login:
+            # "input-remapper-gtk" does not exist there, launch through
+            # flatpak instead. Requires --filesystem=~/.config/autostart.
+            app_id = os.environ.get(
+                "FLATPAK_ID", "io.github.sezanzeb.input_remapper"
+            )
+            exec_cmd = f"flatpak run {app_id}"
+            if hidden:
+                exec_cmd = (
+                    f"flatpak run --env=INPUT_REMAPPER_START_HIDDEN=1 {app_id}"
+                )
+            icon_name = app_id
+        else:
+            exec_cmd = "input-remapper-gtk"
+            if hidden:
+                exec_cmd = "env INPUT_REMAPPER_START_HIDDEN=1 input-remapper-gtk"
+            icon_name = "input-remapper"
         lines = [
             "[Desktop Entry]",
             "Type=Application",
             "Name=input-remapper-gtk",
             f"Exec={exec_cmd}",
-            "Icon=input-remapper",
+            f"Icon={icon_name}",
             f"{AUTOSTART_HIDDEN_KEY}={'true' if hidden else 'false'}",
         ]
         if enabled:
