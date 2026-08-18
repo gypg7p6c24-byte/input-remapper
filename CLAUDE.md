@@ -44,7 +44,10 @@ Un écart qui demande un arbitrage → `gov_kanban_create`, pas une ligne dans l
 
 ## Kanban
 Canal unique : outils MCP `gov_kanban_*`.
-Colonnes, cycle de vie, canaux interdits et dépannage : **`Direction/KANBAN.md`** (source unique).
+Modèle de flux, definition of ready et pièges — lisibles depuis n'importe quelle session :
+dépôt `mcp-synology-odysseus`, `docs/kanban-modele-flux.md` (`nas_git_read_file`).
+`Direction/KANBAN.md` porte le design côté COMEX mais vit hors git sur le Mac : une session
+sans le dossier monté ne peut pas le lire (carte #49).
 
 ## Garde-fou
 Si un sujet abordé sort de ce périmètre, le signaler et proposer le bon niveau/projet.
