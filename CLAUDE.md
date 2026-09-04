@@ -46,8 +46,39 @@ Un écart qui demande un arbitrage → `gov_kanban_create`, pas une ligne dans l
 Canal unique : outils MCP `gov_kanban_*`.
 Modèle de flux, definition of ready et pièges — lisibles depuis n'importe quelle session :
 dépôt `mcp-synology-odysseus`, `docs/kanban-modele-flux.md` (`nas_git_read_file`).
-`Direction/KANBAN.md` porte le design côté COMEX mais vit hors git sur le Mac : une session
-sans le dossier monté ne peut pas le lire (carte #49).
+
+## Accès — kanban, git, Gitea
+
+Rien de tout cela ne dépend du dossier monté : les outils MCP répondent depuis n'importe quelle
+session, y compris quand seul le dossier de ce projet est ouvert.
+
+| Besoin | Voie | Secret à fournir |
+|---|---|---|
+| Kanban | outils `gov_kanban_*` | aucun |
+| Lire / écrire le dépôt (fetch, commit, push, tag) | outils `nas_git_*` | aucun |
+| Interface web Gitea | `http://192.168.1.63:3000/claude/<projet>` | jeton personnel, hors session |
+| Push depuis le MacBook | `ssh://git@192.168.1.63:2222/claude/<projet>.git`, remote `nas` | clé SSH |
+
+**Une session n'a aucun secret à fournir.** Le conteneur MCP porte sa propre identité Gitea —
+compte de service `claude-mcp`, jeton dans son `.env` sur le NAS, injecté à l'exécution et jamais
+persisté dans le dépôt. C'est pour cela que commit, push et tag fonctionnent sans rien configurer.
+Le compte **personnel** de Pierre est une identité distincte, qui ne sert qu'au poste.
+
+**Un secret ne transite jamais par le canal MCP**, ne vit jamais dans un dépôt ni dans un fichier
+du dossier monté, et ne s'affiche jamais dans une réponse. Méthode de référence (décision du
+2026-08-13) : `nas_git_read_file(name="mcp-synology-odysseus", path="docs/secrets-et-acces.md")`.
+
+## Fichiers à supprimer — règle commune
+
+**Rien ne se supprime dans le dossier de travail de Pierre.** Le montage du Mac refuse `unlink`, et
+une suppression est de toute façon irréversible. Tout élément à supprimer est **déplacé** dans
+`Projects/archives/_to_delete/AAAA-MM-JJ/`, chemin d'origine conservé dans le nom du fichier, puis
+**annoncé à Pierre**. La purge est faite par lui, ou sur une proposition qu'il valide — jamais
+d'office. **Ne pas demander l'autorisation système de suppression** : le déplacement suffit.
+
+Cas le plus fréquent : les **verrous git orphelins** des clones Mac — `index.lock` et `HEAD.lock`
+sont **fatals** (tout commit de Pierre échoue `rc=128`). Cause et conduite à tenir :
+`nas_git_read_file(name="mcp-synology-odysseus", path="docs/ouverture-session.md")`.
 
 ## Garde-fou
 Si un sujet abordé sort de ce périmètre, le signaler et proposer le bon niveau/projet.
