@@ -37,6 +37,7 @@ from inputremapper.configs.global_config import GlobalConfig
 from inputremapper.configs.migrations import Migrations
 from inputremapper.injection.global_uinputs import GlobalUInputs, FrontendUInput
 from inputremapper.logging.logger import logger
+from inputremapper.polkit_rule import RULE_MARKER, polkit_rule_body
 from inputremapper.user import UserUtils
 
 
@@ -480,16 +481,8 @@ class InputRemapperControlBin:
 
         if enable:
             os.makedirs(rules_dir, exist_ok=True)
-            rule = (
-                "polkit.addRule(function(action, subject) {\n"
-                f"  if (action.id == \"inputremapper\" && subject.user == \"{user}\""
-                " && subject.active) {\n"
-                "    return polkit.Result.YES;\n"
-                "  }\n"
-                "});\n"
-            )
             with open(path, "w", encoding="utf-8") as handle:
-                handle.write(rule)
+                handle.write(polkit_rule_body(user))
             logger.info("Installed polkit rule at %s", path)
         else:
             try:
@@ -506,11 +499,18 @@ class InputRemapperControlBin:
             return
 
         path = self._polkit_rule_path(user)
+        marker = RULE_MARKER
         if os.path.isfile(path):
-            logger.debug("Polkit rule already present at %s", path)
-            return
+            try:
+                with open(path, "r", encoding="utf-8") as handle:
+                    if marker in handle.read():
+                        logger.debug("Polkit rule already present at %s", path)
+                        return
+            except OSError as error:
+                logger.warning("Could not read polkit rule at %s: %s", path, error)
+            logger.info("Replacing outdated polkit rule at %s", path)
 
-        logger.info("Installing one-time polkit rule for user %s", user)
+        logger.info("Installing polkit rule for user %s", user)
         self._set_polkit_rule(enable=True)
 
     def _num_logged_in_users(self) -> int:

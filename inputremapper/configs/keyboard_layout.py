@@ -21,7 +21,7 @@
 import json
 import re
 import subprocess
-from typing import Optional, List, Iterable, Tuple
+from typing import Optional, List, Iterable, Tuple, Dict
 
 import evdev
 
@@ -38,6 +38,17 @@ XKB_KEYCODE_OFFSET = 8
 
 XMODMAP_FILENAME = "xmodmap.json"
 
+CHARACTERS_FILENAME = "characters.json"
+
+# Which modifiers have to be held for each shift level of a key. Levels beyond
+# these four are not reachable with a plain modifier combination.
+LEVEL_MODIFIERS: Tuple[Tuple[str, ...], ...] = (
+    (),
+    ("Shift_L",),
+    ("ISO_Level3_Shift",),
+    ("Shift_L", "ISO_Level3_Shift"),
+)
+
 LAZY_LOAD = None
 
 
@@ -47,6 +58,8 @@ class KeyboardLayout:
     _mapping: Optional[dict] = LAZY_LOAD
     _xmodmap: Optional[List[Tuple[str, str]]] = LAZY_LOAD
     _case_insensitive_mapping: Optional[dict] = LAZY_LOAD
+    # character -> [keycode, [modifier names]], for symbols that need a level
+    _characters: Optional[dict] = LAZY_LOAD
 
     def __getattribute__(self, wanted: str):
         """To lazy load keyboard_layout info only when needed.
@@ -54,7 +67,12 @@ class KeyboardLayout:
         For example, this helps to keep logs of input-remapper-control clear when it
         doesn't need it the information.
         """
-        lazy_loaded_attributes = ["_mapping", "_xmodmap", "_case_insensitive_mapping"]
+        lazy_loaded_attributes = [
+            "_mapping",
+            "_xmodmap",
+            "_case_insensitive_mapping",
+            "_characters",
+        ]
         for lazy_loaded_attribute in lazy_loaded_attributes:
             if wanted != lazy_loaded_attribute:
                 continue
@@ -182,6 +200,96 @@ class KeyboardLayout:
             logger.debug('Writing "%s"', path)
             json.dump(symbols, file, indent=4)
 
+    def _learn_characters(self) -> None:
+        """Learn which key and modifiers produce each printable character.
+
+        `_mapping` only knows base-level symbol names, so a macro could not ask
+        for "@" or "e" with an accent without knowing the keysym name AND the
+        modifiers of the current layout. Gdk already holds the full layout, so
+        the table is built from it and cached for the service, which has no
+        session to read a layout from.
+        """
+        try:
+            import gi
+
+            gi.require_version("Gdk", "3.0")
+            from gi.repository import Gdk
+        except (ImportError, ValueError) as error:
+            logger.info("Gdk not available to learn characters: %s", error)
+            return
+
+        display = Gdk.Display.get_default()
+        if display is None:
+            return
+        keymap = Gdk.Keymap.get_for_display(display)
+        if keymap is None:
+            return
+
+        characters: Dict[str, list] = {}
+        levels: Dict[str, int] = {}
+        for keycode in range(XKB_KEYCODE_OFFSET, 256):
+            try:
+                found, keys, keyvals = keymap.get_entries_for_keycode(keycode)
+            except Exception:
+                continue
+            if not found or not keyvals:
+                continue
+            for key, keyval in zip(keys, keyvals):
+                if not keyval or key.group != 0:
+                    continue
+                if key.level >= len(LEVEL_MODIFIERS):
+                    continue
+                unicode_point = Gdk.keyval_to_unicode(keyval)
+                if not unicode_point:
+                    continue
+                character = chr(unicode_point)
+                if not character.isprintable() or character.isspace():
+                    continue
+                # the easiest way to type a character wins
+                if character in levels and levels[character] <= key.level:
+                    continue
+                levels[character] = key.level
+                characters[character] = [
+                    keycode - XKB_KEYCODE_OFFSET,
+                    list(LEVEL_MODIFIERS[key.level]),
+                ]
+
+        if not characters:
+            logger.info("Gdk keymap did not yield any character")
+            return
+
+        self._characters = characters
+        self._write_characters_cache(characters)
+        logger.info("Learned %d typable characters from the layout", len(characters))
+
+    def _write_characters_cache(self, characters: dict) -> None:
+        path = PathUtils.get_config_path(CHARACTERS_FILENAME)
+        PathUtils.touch(path)
+        with open(path, "w") as file:
+            logger.debug('Writing "%s"', path)
+            json.dump(characters, file, indent=4)
+
+    def _read_characters_cache(self) -> dict:
+        path = PathUtils.get_config_path(CHARACTERS_FILENAME)
+        try:
+            with open(path, "r") as file:
+                return json.load(file)
+        except (OSError, ValueError) as error:
+            logger.debug('Could not read "%s": %s', path, error)
+            return {}
+
+    def get_character(self, character: str) -> Optional[Tuple[int, List[str]]]:
+        """Which keycode and held modifiers type this single character."""
+        if self._characters is LAZY_LOAD:
+            self.populate()
+        if not self._characters or len(character) != 1:
+            return None
+        entry = self._characters.get(character)
+        if not entry:
+            return None
+        code, modifiers = entry[0], list(entry[1])
+        return int(code), modifiers
+
     def _use_linux_evdev_symbols(self):
         """Look up the evdev constant names and use them."""
         for name, ecode in evdev.ecodes.ecodes.items():
@@ -199,6 +307,9 @@ class KeyboardLayout:
             # On Wayland xmodmap is unavailable; fall back to GTK's keymap.
             if not self._use_xmodmap_symbols():
                 self._use_gdk_symbols()
+            self._learn_characters()
+        else:
+            self._characters = self._read_characters_cache()
 
         self._use_linux_evdev_symbols()
 

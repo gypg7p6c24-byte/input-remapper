@@ -124,9 +124,33 @@ def _restore_user_ownership(path: str) -> None:
         return
 
     try:
-        os.chown(path, uid, gid)
+        # never follow a symlink: this runs as root on a path inside the user's
+        # home, where the user controls every component
+        os.chown(path, uid, gid, follow_symlinks=False)
     except OSError:
         pass
+
+
+class _NoFollowRotatingFileHandler(RotatingFileHandler):
+    """RotatingFileHandler that refuses to open the log file through a symlink.
+
+    The privileged services write this log into the unprivileged user's home.
+    Opening it with plain `open()` would let a symlink planted there redirect
+    root's writes — and the subsequent chown — onto any file on the system.
+    """
+
+    def _open(self):
+        flags = os.O_WRONLY | os.O_CREAT | os.O_NOFOLLOW | os.O_NOCTTY
+        flags |= os.O_TRUNC if self.mode.startswith("w") else os.O_APPEND
+        fd = os.open(self.baseFilename, flags, 0o600)
+        try:
+            owner = _monitor_owner_ids()
+            if owner is not None and os.geteuid() == 0 and owner[0] != 0:
+                os.fchown(fd, owner[0], owner[1])
+            os.fchmod(fd, 0o600)
+        except OSError:
+            pass
+        return os.fdopen(fd, self.mode, encoding=self.encoding, errors=self.errors)
 
 
 def _create_monitor_handler(path: str) -> RotatingFileHandler:
@@ -134,17 +158,12 @@ def _create_monitor_handler(path: str) -> RotatingFileHandler:
     os.makedirs(directory, exist_ok=True)
     _restore_user_ownership(directory)
 
-    handler = RotatingFileHandler(
+    handler = _NoFollowRotatingFileHandler(
         path,
         maxBytes=MONITOR_MAX_BYTES,
         backupCount=MONITOR_BACKUP_COUNT,
         encoding="utf-8",
     )
-    _restore_user_ownership(path)
-    try:
-        os.chmod(path, 0o600)
-    except OSError:
-        pass
 
     handler._input_remapper_monitor_handler = True
     handler.setLevel(logging.DEBUG)

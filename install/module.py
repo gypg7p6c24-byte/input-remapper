@@ -110,9 +110,15 @@ def _get_packages_dir() -> str:
 
 
 def _get_commit_hash() -> str:
-    git_call = subprocess.check_output(["git", "rev-parse", "HEAD"])
-    commit = git_call.decode().strip()
-    return commit
+    # Building from an exported tree (source tarball, flatpak `dir` source)
+    # means no .git at all; that must not abort the installation.
+    try:
+        git_call = subprocess.check_output(
+            ["git", "rev-parse", "HEAD"], stderr=subprocess.DEVNULL
+        )
+    except (subprocess.CalledProcessError, FileNotFoundError):
+        return "unknown"
+    return git_call.decode().strip()
 
 
 def _set_variables(target: str) -> None:

@@ -71,14 +71,15 @@ class HierarchyHandler(MappingHandler):
         Without this, one inactive ABS->BTN handler can consume an event and prevent
         the opposite-direction handler from activating during a fast direction switch.
         """
+        # `find_analog_input_config` only ever returns configs WITHOUT a
+        # threshold (that is what "analog" means here), so it can never be used
+        # to find the thresholded ABS->BTN inputs this passthrough is about.
         signs = set()
         for handler in self.handlers:
-            analog = handler.mapping.input_combination.find_analog_input_config(
-                type_=EV_ABS
-            )
-            if not analog or analog.analog_threshold is None:
-                continue
-            signs.add(1 if analog.analog_threshold > 0 else -1)
+            for input_config in handler.mapping.input_combination:
+                if input_config.type == EV_ABS and input_config.analog_threshold:
+                    signs.add(1 if input_config.analog_threshold > 0 else -1)
+                    break
 
         if len(signs) <= 1:
             return

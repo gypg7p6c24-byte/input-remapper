@@ -42,8 +42,31 @@ class KeyTask(Task):
     async def run(self, callback) -> None:
         symbol = self.get_argument("symbol").get_value()
         code = keyboard_layout.get(symbol)
+        modifier_codes: list = []
+
+        if code is None:
+            # a printable character the layout only reaches through a shift
+            # level, e.g. "@" or an accented letter
+            resolved = keyboard_layout.get_character(str(symbol))
+            if resolved is not None:
+                code, modifiers = resolved
+                modifier_codes = [
+                    keyboard_layout.get(name)
+                    for name in modifiers
+                    if keyboard_layout.get(name) is not None
+                ]
+
+        for modifier_code in modifier_codes:
+            callback(EV_KEY, modifier_code, 1)
+        if modifier_codes:
+            await self.keycode_pause()
 
         callback(EV_KEY, code, 1)
         await self.keycode_pause()
         callback(EV_KEY, code, 0)
         await self.keycode_pause()
+
+        for modifier_code in reversed(modifier_codes):
+            callback(EV_KEY, modifier_code, 0)
+        if modifier_codes:
+            await self.keycode_pause()

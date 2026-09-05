@@ -20,6 +20,7 @@
 
 """User Interface."""
 import os
+import tempfile
 import subprocess
 import threading
 from typing import Dict, Callable, Tuple, Optional
@@ -659,11 +660,11 @@ class UserInterface:
             env.update(monitor_env_vars())
 
         logger.info("Installing update via `%s`", " ".join(command))
-        exit_code = subprocess.call(command, env=env)
-
-        if is_flatpak():
-            # The native path (apt) removes the .deb itself; clean up the
-            # bundle here in the flatpak path.
+        try:
+            exit_code = subprocess.call(command, env=env)
+        finally:
+            # a successful native install removes the .deb itself; every other
+            # outcome would otherwise leave tens of MB behind on each attempt
             try:
                 os.remove(package_path)
             except OSError:
@@ -1214,8 +1215,22 @@ class UserInterface:
         else:
             lines.append("Hidden=true")
             lines.append("X-GNOME-Autostart-enabled=false")
-        with open(path, "w", encoding="utf-8") as handle:
+        # write atomically: a truncated file still reads as "autostart enabled"
+        # while starting nothing at all
+        directory = os.path.dirname(path) or "."
+        os.makedirs(directory, exist_ok=True)
+        with tempfile.NamedTemporaryFile(
+            "w",
+            encoding="utf-8",
+            dir=directory,
+            prefix=".autostart-",
+            delete=False,
+        ) as handle:
             handle.write("\n".join(lines) + "\n")
+            handle.flush()
+            os.fsync(handle.fileno())
+            temporary = handle.name
+        os.replace(temporary, path)
 
     def on_gtk_about_clicked(self, _):
         """Show the about/help dialog."""
