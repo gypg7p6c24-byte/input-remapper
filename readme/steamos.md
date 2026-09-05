@@ -6,7 +6,8 @@ Deck) in **Desktop mode (KDE Plasma)**. For Ubuntu, see the main
 
 ## Download
 
-**[Download input-remapper-&lt;version&gt;.flatpak](https://github.com/gypg7p6c24-byte/input-remapper/releases/tag/dev-latest)** (rolling dev build, no GitHub account required).
+**Download `input-remapper-<version>.flatpak`** from the `dev-latest` release
+(rolling development build, no account required).
 
 In Desktop mode, double-click the downloaded file to install it via **Discover**,
 or from a terminal:
@@ -80,9 +81,15 @@ and close games.
 
 ## Updates
 
-The in-app updater supports release **channels** (stable / dev) from the GitHub
-repo and, on SteamOS, offers the matching **Flatpak** bundle instead of the
-`.deb`. The dev channel tracks the `dev-latest` release published by CI.
+The in-app updater reads the rolling releases `dev-latest` (dev channel) and
+`stable-latest` (stable channel) published by the build chain, and on SteamOS
+offers the matching **Flatpak** bundle instead of the `.deb`.
+
+No credentials are needed. The feed can be pointed elsewhere without touching
+the code, through `INPUT_REMAPPER_FORGE_OWNER`, `INPUT_REMAPPER_FORGE_REPO`,
+`INPUT_REMAPPER_FORGE_URL` and `INPUT_REMAPPER_FORGE_API_URL` — a Gitea
+instance exposes the same release API shape. `INPUT_REMAPPER_FORGE_TOKEN`
+authenticates the request when a forge does not serve its releases anonymously.
 
 ## Status
 

@@ -59,6 +59,10 @@ modules:
   - name: gtksourceview4
     buildsystem: meson
     config-opts:
+      # meson installs into lib64 on x86_64, where the GI repository is not
+      # searched: GtkSource-4.typelib would be invisible and the app would not
+      # start at all ("Namespace GtkSource not available for version 4")
+      - --libdir=lib
       - -Dvapi=false
       - -Dgtk_doc=false
     sources:
@@ -110,6 +114,10 @@ modules:
 
   - name: libayatana-ido
     buildsystem: cmake-ninja
+    # cmake defaults to lib64 on x86_64, where neither pkg-config nor the
+    # runtime linker looks: the next module then fails to find this one
+    config-opts:
+      - -DCMAKE_INSTALL_LIBDIR=lib
     cleanup:
       - /include
       - /lib/pkgconfig
@@ -120,6 +128,10 @@ modules:
 
   - name: libayatana-indicator
     buildsystem: cmake-ninja
+    # cmake defaults to lib64 on x86_64, where neither pkg-config nor the
+    # runtime linker looks: the next module then fails to find this one
+    config-opts:
+      - -DCMAKE_INSTALL_LIBDIR=lib
     cleanup:
       - /include
       - /lib/pkgconfig
@@ -131,6 +143,7 @@ modules:
   - name: libayatana-appindicator
     buildsystem: cmake-ninja
     config-opts:
+      - -DCMAKE_INSTALL_LIBDIR=lib
       - -DENABLE_BINDINGS_MONO=NO
       - -DENABLE_BINDINGS_VALA=NO
       - -DENABLE_GTKDOC=NO
@@ -216,6 +229,12 @@ modules:
       # for the game auto-switcher: the sandbox cannot see host processes.
       - install -Dm755 install/flatpak/host/input-remapper-game-scan ${FLATPAK_DEST}/bin/input-remapper-game-scan
     sources:
-      - type: git
-        url: https://github.com/gypg7p6c24-byte/input-remapper.git
-        branch: dev
+      # Build THIS working tree, not a remote branch. Pointing at GitHub's
+      # `dev` meant the bundle silently ignored every local change and every
+      # commit that only exists on the NAS forge.
+      - type: dir
+        path: ../..
+        skip:
+          - .flatpak-builder
+          - .git
+          - _livraison

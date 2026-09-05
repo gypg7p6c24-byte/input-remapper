@@ -5,8 +5,12 @@ import unittest
 from unittest.mock import patch
 
 from inputremapper.update_service import (
+    FORGE_API_BASE_URL,
+    FORGE_TOKEN_ENV,
     UpdateRelease,
+    _auth_headers,
     fetch_release,
+    forge_token,
     normalize_version,
     release_page_for_channel,
 )
@@ -51,6 +55,24 @@ class TestUpdateService(unittest.TestCase):
         self.assertEqual(release.channel, "dev")
         self.assertEqual(release.version, "2.3.1.dev1")
         self.assertEqual(release.debian_version, "2.3.1~dev1")
+
+
+class TestForgeTarget(unittest.TestCase):
+    def test_the_update_feed_points_at_the_build_chain(self):
+        self.assertTrue(
+            FORGE_API_BASE_URL.endswith("/repos/gypg7p6c24-byte/input-remapper")
+        )
+
+    def test_token_comes_from_the_environment_and_is_sent_as_a_header(self):
+        with patch.dict("os.environ", {FORGE_TOKEN_ENV: "  secret  "}):
+            self.assertEqual(forge_token(), "secret")
+            self.assertEqual(_auth_headers(), {"Authorization": "token secret"})
+
+    def test_no_token_means_no_authorization_header(self):
+        # the forge serves its Releases unit anonymously: no header at all
+        with patch.dict("os.environ", {FORGE_TOKEN_ENV: ""}):
+            self.assertEqual(forge_token(), "")
+            self.assertEqual(_auth_headers(), {})
 
 
 if __name__ == "__main__":

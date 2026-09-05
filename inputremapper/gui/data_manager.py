@@ -30,6 +30,10 @@ from inputremapper.configs.input_config import InputCombination, InputConfig
 from inputremapper.configs.mapping import UIMapping, MappingData
 from inputremapper.configs.paths import PathUtils
 from inputremapper.configs.preset import Preset
+from inputremapper.configs.preset_suggestions import (
+    existing_preset_paths,
+    suggest_bindings,
+)
 from inputremapper.configs.keyboard_layout import KeyboardLayout
 from inputremapper.daemon import DaemonProxy
 from inputremapper.exceptions import DataManagementError
@@ -548,8 +552,32 @@ class DataManager:
         if os.path.exists(path):
             raise DataManagementError("Unable to add preset. Preset exists")
 
-        Preset(path).save()
+        preset = Preset(path)
+        suggested = 0
+        if self._config.get_suggest_recurrent_bindings():
+            suggested = self._prefill_with_recurrent_bindings(preset)
+        preset.save()
         self.publish_group()
+        return suggested
+
+    def _prefill_with_recurrent_bindings(self, preset: Preset) -> int:
+        """Seed a new preset with the bindings this user keeps repeating."""
+        try:
+            suggestions = suggest_bindings(existing_preset_paths())
+        except Exception as error:
+            logger.warning("Could not compute binding suggestions: %s", error)
+            return 0
+
+        added = 0
+        for mapping_dict in suggestions:
+            try:
+                preset.add(UIMapping(**mapping_dict))
+                added += 1
+            except Exception as error:
+                logger.debug("Skipping suggested binding: %s", error)
+        if added:
+            logger.info("Pre-filled the new preset with %d recurrent bindings", added)
+        return added
 
     def delete_preset(self):
         """Delete the active preset.

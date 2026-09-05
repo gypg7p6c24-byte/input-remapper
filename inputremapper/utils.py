@@ -29,6 +29,8 @@ from typing import Optional, NewType, Iterable, List, Tuple, Dict, Any
 
 import evdev
 
+from inputremapper.logging.logger import logger
+
 DeviceHash = NewType("DeviceHash", str)
 
 
@@ -176,6 +178,10 @@ def _read_wstring(data: bytes, index: int) -> Tuple[str, int]:
     return b"".join(chunks).decode("utf-16le", "replace"), index
 
 
+# Steam's own nesting stays far below this; anything deeper is a corrupt file.
+_VDF_MAX_DEPTH = 32
+
+
 def _parse_binary_vdf(data: bytes) -> Dict[str, Any]:
     type_end = 0x08
     type_object = 0x00
@@ -187,8 +193,12 @@ def _parse_binary_vdf(data: bytes) -> Dict[str, Any]:
     type_color = 0x06
     type_uint64 = 0x07
 
-    def parse_obj(idx: int) -> Tuple[Dict[str, Any], int]:
+    def parse_obj(idx: int, depth: int = 0) -> Tuple[Dict[str, Any], int]:
         obj: Dict[str, Any] = {}
+        if depth > _VDF_MAX_DEPTH:
+            # a truncated or zero-filled file (Steam crash) otherwise recurses
+            # once every two null bytes and blows the stack
+            return obj, len(data)
         while idx < len(data):
             token = data[idx]
             idx += 1
@@ -196,7 +206,7 @@ def _parse_binary_vdf(data: bytes) -> Dict[str, Any]:
                 break
             key, idx = _read_cstring(data, idx)
             if token == type_object:
-                value, idx = parse_obj(idx)
+                value, idx = parse_obj(idx, depth + 1)
             elif token == type_string:
                 value, idx = _read_cstring(data, idx)
             elif token == type_int32:
@@ -288,7 +298,12 @@ def get_steam_shortcuts() -> List[Tuple[str, str, str, str, str]]:
             data = open(path, "rb").read()
         except OSError:
             continue
-        parsed = _parse_binary_vdf(data)
+        try:
+            parsed = _parse_binary_vdf(data)
+        except Exception as error:
+            # a corrupt shortcuts.vdf must never keep the GUI from starting
+            logger.warning('Ignoring unreadable "%s": %s', path, error)
+            continue
         entries = parsed.get("shortcuts")
         if not isinstance(entries, dict):
             continue

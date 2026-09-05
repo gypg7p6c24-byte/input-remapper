@@ -17,7 +17,7 @@
 # You should have received a copy of the GNU General Public License
 # along with input-remapper.  If not, see <https://www.gnu.org/licenses/>.
 
-"""GitHub-backed update lookup and package download helpers."""
+"""Forge-backed update lookup and package download helpers."""
 
 from __future__ import annotations
 
@@ -32,10 +32,23 @@ from urllib import error, request
 
 from inputremapper.user import is_flatpak
 
-GITHUB_OWNER = "gypg7p6c24-byte"
-GITHUB_REPO = "input-remapper"
-RELEASES_BASE_URL = f"https://github.com/{GITHUB_OWNER}/{GITHUB_REPO}/releases"
-GITHUB_API_BASE_URL = f"https://api.github.com/repos/{GITHUB_OWNER}/{GITHUB_REPO}"
+# Releases are published by the build chain, which runs on GitHub. Every part
+# is overridable so another forge, owner or repository can be pointed at
+# without touching the code — a Gitea instance exposes the same release API
+# shape under /api/v1/repos/<owner>/<repo>.
+FORGE_OWNER = os.environ.get("INPUT_REMAPPER_FORGE_OWNER", "gypg7p6c24-byte")
+FORGE_REPO = os.environ.get("INPUT_REMAPPER_FORGE_REPO", "input-remapper")
+FORGE_WEB_URL = os.environ.get(
+    "INPUT_REMAPPER_FORGE_URL", "https://github.com"
+).rstrip("/")
+FORGE_API_URL = os.environ.get(
+    "INPUT_REMAPPER_FORGE_API_URL", "https://api.github.com"
+).rstrip("/")
+# Optional, for a forge whose releases are not readable anonymously. Never
+# shipped with the app: environment only.
+FORGE_TOKEN_ENV = "INPUT_REMAPPER_FORGE_TOKEN"
+RELEASES_BASE_URL = f"{FORGE_WEB_URL}/{FORGE_OWNER}/{FORGE_REPO}/releases"
+FORGE_API_BASE_URL = f"{FORGE_API_URL}/repos/{FORGE_OWNER}/{FORGE_REPO}"
 CHANNEL_RELEASE_TAGS = {
     "stable": "stable-latest",
     "dev": "dev-latest",
@@ -119,18 +132,38 @@ class UpdateRelease:
         return remote < local
 
 
+def forge_token() -> str:
+    """Optional Gitea token; empty when releases are readable anonymously."""
+    return os.environ.get(FORGE_TOKEN_ENV, "").strip()
+
+
+def _auth_headers() -> dict[str, str]:
+    token = forge_token()
+    if not token:
+        return {}
+    return {"Authorization": f"token {token}"}
+
+
 def _http_get_json(url: str) -> dict[str, Any]:
     req = request.Request(
         url,
         headers={
             "Accept": "application/vnd.github+json",
             "User-Agent": "input-remapper-update-check",
+            **_auth_headers(),
         },
     )
     try:
         with request.urlopen(req, timeout=20) as response:
             return json.load(response)
     except error.HTTPError as exc:
+        if exc.code == 404:
+            raise UpdateError(f"No release published yet for {url}") from exc
+        if exc.code in (401, 403) and not forge_token():
+            raise UpdateError(
+                f"HTTP {exc.code} for {url} — releases are not readable "
+                f"anonymously on this forge; set {FORGE_TOKEN_ENV}"
+            ) from exc
         raise UpdateError(f"HTTP {exc.code} for {url}") from exc
     except error.URLError as exc:
         raise UpdateError(f"Network error: {exc.reason}") from exc
@@ -153,7 +186,7 @@ def _preferred_asset_suffixes() -> tuple[str, ...]:
 def fetch_release(channel: str) -> UpdateRelease:
     """Fetch rolling release metadata for a channel."""
     tag = release_tag_for_channel(channel)
-    payload = _http_get_json(f"{GITHUB_API_BASE_URL}/releases/tags/{tag}")
+    payload = _http_get_json(f"{FORGE_API_BASE_URL}/releases/tags/{tag}")
     assets = payload.get("assets", [])
 
     selected = None
@@ -212,7 +245,10 @@ def download_release_asset(release: UpdateRelease, dest_dir: str | None = None) 
 
     req = request.Request(
         release.asset_url,
-        headers={"User-Agent": "input-remapper-update-install"},
+        headers={
+            "User-Agent": "input-remapper-update-install",
+            **_auth_headers(),
+        },
     )
     try:
         with request.urlopen(req, timeout=120) as response, open(
