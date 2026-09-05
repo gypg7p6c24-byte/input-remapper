@@ -179,6 +179,15 @@ class GlobalConfig:
             return "stable"
         return channel
 
+    def get_suggest_recurrent_bindings(self) -> bool:
+        """Whether a new preset starts pre-filled with the recurrent bindings."""
+        return bool(self._config.get("ui", {}).get("suggest_recurrent_bindings", True))
+
+    def set_suggest_recurrent_bindings(self, enabled: bool) -> None:
+        ui_config = self._config.setdefault("ui", {})
+        ui_config["suggest_recurrent_bindings"] = bool(enabled)
+        self._save_config()
+
     def set_update_channel(self, channel: str) -> None:
         """Persist the selected update channel."""
         if channel not in {"stable", "dev"}:

@@ -190,6 +190,13 @@ class Argument(ArgumentConfig):
         code = keyboard_layout.get(symbol)
 
         if code is None:
+            # single printable characters are accepted even when the layout
+            # only reaches them through a shift level, e.g. "@" or "e" accented
+            resolved = keyboard_layout.get_character(symbol)
+            if resolved is not None:
+                code = resolved[0]
+
+        if code is None:
             raise MacroError(msg=f'Unknown key "{symbol}"')
 
         if self._mapping is not None:

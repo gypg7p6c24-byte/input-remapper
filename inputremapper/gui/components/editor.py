@@ -797,7 +797,7 @@ class SteamProcessWatcher:
             "init shortcuts",
             {"count": len(self._shortcuts), "shortcuts": self._shortcuts},
         )
-        self._host_scan_running = False
+        self._scan_running = False
         if is_flatpak():
             # /proc inside the sandbox has its own PID namespace and never
             # shows Steam or the games running on the host. Scan the host
@@ -820,20 +820,33 @@ class SteamProcessWatcher:
             logger.debug("GAME_WATCHER_DEBUG %s failed: %s", label, exc)
 
     def _poll(self):
+        # Reading exe/cwd/cmdline/environ of every PID means thousands of file
+        # accesses; on the main loop that shows up as UI stutter every second.
+        if self._scan_running:
+            return True
+        self._scan_running = True
         self._ticks += 1
-        hits = []
-        for pid in self._list_pids():
-            info = self._inspect_pid(pid)
-            if info.get("matches"):
-                hits.append(info)
-        self._process_hits(hits)
+        threading.Thread(target=self._local_scan_worker, daemon=True).start()
         return True
+
+    def _local_scan_worker(self):
+        try:
+            hits = []
+            for pid in self._list_pids():
+                info = self._inspect_pid(pid)
+                if info.get("matches"):
+                    hits.append(info)
+            GLib.idle_add(self._process_hits, hits)
+        except Exception as exc:
+            self._log_debug_kv("local scan error", {"error": exc})
+        finally:
+            self._scan_running = False
 
     def _poll_host(self):
         # Only one host scan at a time; skip the tick if one is in flight.
-        if self._host_scan_running:
+        if self._scan_running:
             return True
-        self._host_scan_running = True
+        self._scan_running = True
         self._ticks += 1
         threading.Thread(target=self._host_scan_worker, daemon=True).start()
         return True
@@ -858,7 +871,7 @@ class SteamProcessWatcher:
         except Exception as exc:
             self._log_debug_kv("host scan error", {"error": exc})
         finally:
-            self._host_scan_running = False
+            self._scan_running = False
 
     def _run_host_game_scan(self) -> list:
         helper = flatpak_host_helper("input-remapper-game-scan")

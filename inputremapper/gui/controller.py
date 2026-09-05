@@ -544,8 +544,13 @@ class Controller:
         """Create a new preset called `new preset n`, add it to the active_group."""
         name = self.data_manager.get_available_preset_name(name)
         try:
-            self.data_manager.create_preset(name)
+            suggested = self.data_manager.create_preset(name)
             self.data_manager.load_preset(name)
+            if suggested:
+                self.show_status(
+                    CTX_MAPPING,
+                    _("Added %d frequently used bindings") % suggested,
+                )
         except PermissionError as e:
             self.show_status(CTX_ERROR, _("Permission denied!"), str(e))
 
@@ -628,12 +633,19 @@ class Controller:
     def save(self):
         """Save all data to the disc."""
         try:
+            preset = self.data_manager.active_preset
+            changed = preset is not None and preset.has_unsaved_changes()
             self.data_manager.save()
-            self._reinject_if_running()
+            if changed:
+                # restarting the injection re-grabs every device, so only do it
+                # when the preset actually changed
+                self._reinject_if_running()
         except PermissionError as e:
             self.show_status(CTX_ERROR, _("Permission denied!"), str(e))
 
-    @debounce(300)
+    # long enough that typing a macro (the editor saves ~3 times a second)
+    # results in a single restart once the user stops, not one per pause
+    @debounce(1500)
     def _reinject_if_running(self):
         """Refresh injection to apply live changes when already running."""
         try:
@@ -641,10 +653,11 @@ class Controller:
         except DataManagementError:
             return False
 
+        # NO_GRAB is deliberately absent: an injection that already failed to
+        # grab is not worth restarting on every edit
         if state not in (
             InjectorState.RUNNING,
             InjectorState.STARTING,
-            InjectorState.NO_GRAB,
         ):
             return False
 
