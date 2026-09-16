@@ -1,10 +1,18 @@
 name: Channel Release
 
+# Publishes the Debian package to the `stable-latest` rolling release.
+#
+# `main` ONLY, deliberately. This workflow deletes its target release with
+# `--cleanup-tag` before recreating it, which destroys every asset already
+# attached. While it also ran on `dev` it raced `flatpak.yml` over the shared
+# `dev-latest` release: whichever finished last won, so the
+# input-remapper-<version>.flatpak asset survived or vanished at random — and
+# the in-app updater reads the available version from that asset's name.
+# One rolling tag, one owner: `stable-latest` here, `dev-latest` in flatpak.yml.
 on:
   push:
     branches:
       - main
-      - dev
   workflow_dispatch:
 
 permissions:
