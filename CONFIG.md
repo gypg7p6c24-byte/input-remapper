@@ -34,9 +34,21 @@ L'asset porte le nom `input-remapper-<version>.flatpak` : c'est de ce nom que le
 de mise à jour intégré déduit la version disponible. Détail : `readme/flatpak.md`.
 
 ## Version applicative
-La version est inscrite en cinq endroits, à tenir alignés :
-`pyproject.toml` · `inputremapper/installation_info.py` · `DEBIAN/control` ·
-`data/io.github.sezanzeb.input_remapper.metainfo.xml` · `data/input-remapper.glade`.
+Version courante : **1.0.0**.
+
+Elle est inscrite en **six** endroits, à tenir alignés :
+
+| Fichier | Qui le lit |
+|---|---|
+| `pyproject.toml` | la chaîne Flatpak, pour nommer l'asset |
+| `DEBIAN/control` | `scripts/build-deb.sh`, pour nommer le paquet |
+| `inputremapper/installation_info.py` | l'application |
+| `data/io.github.sezanzeb.input_remapper.metainfo.xml` | les magasins d'applications |
+| `data/input-remapper.glade` | l'écran « À propos » |
+| `README.md` | le lecteur, pour le nom du paquet stable |
+
+Les deux premiers déterminent le nom des assets publiés : les désaligner casse le
+mécanisme de mise à jour, qui déduit la version du nom de l'asset.
 
 ## Gestion Git
 Deux remotes d'écriture, `nas` (source de vérité) et `github` (construction et
