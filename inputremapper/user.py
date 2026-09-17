@@ -96,7 +96,7 @@ def flatpak_host_app_path() -> str:
 
 
 def flatpak_installation_scope() -> str:
-    """"--user" or "--system": where THIS instance is installed on the host.
+    """Whether to install as --user or --system, following THIS instance.
 
     Installing an update into the wrong scope leaves two installations side by
     side, and the one that is not running silently stops being updated. Anything
