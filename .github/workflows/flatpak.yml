@@ -75,19 +75,14 @@ jobs:
       # replaces the previous one by name: without this the rolling release
       # would accumulate every build ever made, and the updater would have to
       # choose among them.
+      # This container has python3 but no `gh` and no `jq`, and the script
+      # fails loudly rather than reporting success without removing anything —
+      # a silent cleanup is how dev-latest came to carry three bundles at once.
       - name: Drop the assets left by the previous dev build
         if: github.ref == 'refs/heads/dev' || github.event_name == 'workflow_dispatch'
         env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          gh release view dev-latest --json assets --jq '.assets[].name' \
-            2>/dev/null > stale-assets.txt || true
-          while read -r asset; do
-            [ -n "$asset" ] || continue
-            echo "removing stale asset ${asset}"
-            gh release delete-asset dev-latest "$asset" -y
-          done < stale-assets.txt
-          rm -f stale-assets.txt
+          GITHUB_TOKEN: ${{ github.token }}
+        run: python3 scripts/clear-release-assets.py "$GITHUB_REPOSITORY" dev-latest
 
       - name: Publish rolling dev-latest release
         if: github.ref == 'refs/heads/dev' || github.event_name == 'workflow_dispatch'
