@@ -38,6 +38,27 @@ class TestUpdateService(unittest.TestCase):
         self.assertTrue(release.differs_from("2.2.0"))
         self.assertFalse(release.is_older_than("2.2.0"))
 
+    def test_a_rolling_dev_build_is_offered_over_the_previous_one(self):
+        """The dev channel stamps <next version>.dev<run> into every build.
+
+        Two builds must not compare equal, or the updater concludes "already on
+        it" and never enables the install button — the whole reason the in-app
+        updater never worked. And a dev build of the next version must sort
+        above the released one it supersedes.
+        """
+        build = UpdateRelease(
+            channel="dev",
+            version="1.0.1.dev43",
+            debian_version="1.0.1.dev43",
+            release_url="https://example.invalid/release",
+            asset_name="input-remapper-1.0.1.dev43.flatpak",
+            asset_url="https://example.invalid/input-remapper-1.0.1.dev43.flatpak",
+        )
+        self.assertTrue(build.is_newer_than("1.0.1.dev42"))
+        self.assertTrue(build.differs_from("1.0.1.dev42"))
+        self.assertTrue(build.is_newer_than("1.0.0"))
+        self.assertFalse(build.differs_from("1.0.1.dev43"))
+
     def test_fetch_release_parses_deb_asset(self):
         payload = {
             "name": "2.3.1.dev1",

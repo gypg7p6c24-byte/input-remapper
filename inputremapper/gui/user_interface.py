@@ -573,6 +573,12 @@ class UserInterface:
 
     def _on_update_check_failed(self, channel: str, message: str):
         if channel != self._selected_update_channel():
+            # A stale result must still release the lock: leaving it held
+            # makes every later click a no-op for the rest of the session,
+            # and the window lives in the tray for days.
+            self._set_update_busy(
+                False, _("Ready. Check the selected channel for updates.")
+            )
             return False
 
         self._update_release_info = None
@@ -585,6 +591,12 @@ class UserInterface:
 
     def _on_update_check_complete(self, release: UpdateRelease):
         if release.channel != self._selected_update_channel():
+            # A stale result must still release the lock: leaving it held
+            # makes every later click a no-op for the rest of the session,
+            # and the window lives in the tray for days.
+            self._set_update_busy(
+                False, _("Ready. Check the selected channel for updates.")
+            )
             return False
 
         self._update_release_info = release
@@ -691,12 +703,24 @@ class UserInterface:
 
     def _on_update_install_failed(self, channel: str, message: str):
         if channel != self._selected_update_channel():
+            # A stale result must still release the lock: leaving it held
+            # makes every later click a no-op for the rest of the session,
+            # and the window lives in the tray for days.
+            self._set_update_busy(
+                False, _("Ready. Check the selected channel for updates.")
+            )
             return False
         self._set_update_busy(False, _("Update install failed: ") + message)
         return False
 
     def _on_update_install_complete(self, release: UpdateRelease):
         if release.channel != self._selected_update_channel():
+            # A stale result must still release the lock: leaving it held
+            # makes every later click a no-op for the rest of the session,
+            # and the window lives in the tray for days.
+            self._set_update_busy(
+                False, _("Ready. Check the selected channel for updates.")
+            )
             return False
 
         self._set_update_busy(

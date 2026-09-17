@@ -34,28 +34,64 @@ native install, SteamOS uses a **Flatpak**, which:
 - installs and uninstalls in **one click** (no terminal), via the bundle or the
   Discover store.
 
-## The one system permission
+## System permissions
 
-Remapping needs kernel access to `uinput`. A sandbox can't grant that itself, so
-it is done **once**, from inside the app, behind a **single password prompt**:
+Remapping needs kernel access to `uinput`. On SteamOS that access is already
+granted by Valve's `uaccess` rule, so **the app asks for nothing at install or at
+first launch**, and remapping works out of the box.
 
-- a udev rule is written to `/etc/udev/rules.d/` (`/etc` survives OS updates),
-- the `uinput` module is loaded at boot,
-- your user is added to the `input` group.
+Two host-side actions do ask for a password, and only when you trigger them:
 
-Helper script: [`install/flatpak/host/input-remapper-device-access`](../install/flatpak/host/input-remapper-device-access),
-run on the host via `flatpak-spawn --host pkexec`. Disabling it later removes the
-rule. **Your presets are always kept** unless you explicitly ask to remove them.
+| What you do | What is written on the host |
+|---|---|
+| Settings → run in background / autostart | a polkit rule, `/etc/polkit-1/rules.d/90-input-remapper-<user>.rules` |
+| Settings → Uninstall | removes that rule, and the udev rule if present |
 
-## Install
+On a distribution without Valve's rule, device access is granted by
+[`install/flatpak/host/input-remapper-device-access`](../install/flatpak/host/input-remapper-device-access)
+(`enable`), run on the host via `flatpak-spawn --host pkexec`: it writes a udev
+rule to `/etc/udev/rules.d/`, loads `uinput` at boot and adds the user to the
+`input` group. **Your presets are always kept** unless you explicitly ask to
+remove them.
+
+Both rules live in `/etc`, outside the Flatpak. Removing the app **from Discover**
+therefore leaves them behind — use Settings → Uninstall first, see below.
+
+## Install and reinstall
 
 Build/packaging details and the current porting checklist are in
 [`install/flatpak/README.md`](../install/flatpak/README.md).
 
 End-user flow: download the bundle → double-click → **Install** in Discover →
-first launch asks for your password once to enable device access → done. The
-app lives in the tray; closing the window keeps it running, "Quit" from the
-tray stops it.
+launch it. The app lives in the tray; closing the window keeps it running,
+"Quit" from the tray stops it.
+
+**Recommended procedure, and why it is in this order.** Discover installs
+**system-wide**, the in-app updater follows the scope of the running instance, and
+the two host rules above are not owned by the package. So:
+
+1. **Uninstall the old copy from inside the app first** — Settings → Uninstall.
+   It drops the host rules, which Discover would leave behind, then removes the
+   Flatpak. Keep "also remove presets" unticked to keep your presets.
+2. **Check nothing is left**, and in particular that there is only ever one copy:
+
+   ```
+   flatpak list --app --columns=application,version,installation
+   ```
+
+   Exactly one `input-remapper` line is expected. Two lines (`system` and `user`)
+   mean two copies are installed; remove the one you do not want with
+   `flatpak uninstall --system` or `--user`.
+3. **Install the new bundle** by double-clicking it in Discover. Two password
+   prompts in a row are normal when the GNOME 47 runtime is not on the machine
+   yet: Flatpak authorises the runtime install and the app install separately.
+4. **Afterwards, update from the app** (Settings → Check for Updates). It
+   installs into the same scope as the running copy, so it does not create a
+   second one.
+
+Discover's **"Delete settings and user data"** only clears the sandbox's own data
+under `~/.var/app/`. Presets live on the host in `~/.config/input-remapper-2`
+and are **not** touched by it.
 
 ## Per-game presets (Steam and non-Steam)
 
@@ -74,16 +110,24 @@ and close games.
 
 ## Uninstall (one click)
 
-1. In the app: **Settings → Uninstall** (removes device access; keeps presets
-   unless you tick "also remove presets").
-2. Remove the Flatpak (Discover, or
-   `flatpak uninstall io.github.sezanzeb.input_remapper`).
+1. In the app: **Settings → Uninstall** (removes the host rules; keeps presets
+   unless you tick "also remove presets"). It then removes the Flatpak itself,
+   from the same scope the running copy is installed in.
+2. Only if step 1 is unavailable, remove the Flatpak from Discover or with
+   `flatpak uninstall io.github.sezanzeb.input_remapper` — this leaves the host
+   rules in `/etc` behind.
 
 ## Updates
 
 The in-app updater reads the rolling releases `dev-latest` (dev channel) and
 `stable-latest` (stable channel) published by the build chain, and on SteamOS
 offers the matching **Flatpak** bundle instead of the `.deb`.
+
+It decides by **comparing version strings**, so every dev build carries its own
+number: `<next version>.dev<build>`, for example `1.0.1.dev44` while `1.0.0` is
+the stable. A channel that republished the same number could never offer
+anything — the app would report "already on the selected channel version" and
+leave the install button disabled.
 
 No credentials are needed. The feed can be pointed elsewhere without touching
 the code, through `INPUT_REMAPPER_FORGE_OWNER`, `INPUT_REMAPPER_FORGE_REPO`,

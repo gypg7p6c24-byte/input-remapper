@@ -32,13 +32,37 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # The in-app updater parses the version from the asset name
-      # (input-remapper-<version>.flatpak, see inputremapper/update_service.py),
-      # so the bundle must be named with the pyproject version.
+      # The in-app updater compares version strings, and parses the available
+      # one from the asset name (input-remapper-<version>.flatpak, see
+      # inputremapper/update_service.py). A rolling channel that republishes the
+      # same number can therefore never offer anything: the updater concludes
+      # "already on it" and keeps the install button disabled. So every dev
+      # build gets its own number, <pyproject>.dev<run>, stamped into the three
+      # places that decide what the app reports and what the store displays.
+      # `dev` carries the NEXT version (1.0.1 while 1.0.0 is the stable), which
+      # is what makes 1.0.1.dev42 sort above the released 1.0.0.
+      # Tag builds (v*) publish the pyproject version untouched.
       - name: Resolve app version
         run: |
-          APP_VERSION="$(sed -n 's/^version = "\(.*\)"/\1/p' pyproject.toml | head -n1)"
+          BASE_VERSION="$(sed -n 's/^version = "\(.*\)"/\1/p' pyproject.toml | head -n1)"
+          APP_VERSION="${BASE_VERSION}"
+          if [ "${GITHUB_REF_TYPE}" != "tag" ]; then
+            APP_VERSION="${BASE_VERSION}.dev${GITHUB_RUN_NUMBER}"
+            sed -i "s/^version = \".*\"/version = \"${APP_VERSION}\"/" pyproject.toml
+            sed -i "s/^VERSION = \".*\"/VERSION = \"${APP_VERSION}\"/" inputremapper/installation_info.py
+            sed -i "s/^COMMIT_HASH = \".*\"/COMMIT_HASH = \"${GITHUB_SHA}\"/" inputremapper/installation_info.py
+            sed -i "s|<release version=\"${BASE_VERSION}\"|<release version=\"${APP_VERSION}\"|" data/io.github.sezanzeb.input_remapper.metainfo.xml
+          fi
           echo "APP_VERSION=${APP_VERSION}" >> "$GITHUB_ENV"
+
+      # A stamp that missed one file would ship a bundle whose reported version
+      # is not the one the updater compares against, which is the defect this
+      # whole step exists to prevent. Fail here instead.
+      - name: Check every version location carries the build version
+        run: |
+          test "$(sed -n 's/^version = "\(.*\)"/\1/p' pyproject.toml | head -n1)" = "${APP_VERSION}"
+          test "$(sed -n 's/^VERSION = "\(.*\)"/\1/p' inputremapper/installation_info.py)" = "${APP_VERSION}"
+          grep -q "<release version=\"${APP_VERSION}\"" data/io.github.sezanzeb.input_remapper.metainfo.xml
 
       - name: Build Flatpak bundle
         uses: flatpak/flatpak-github-actions/flatpak-builder@v6
