@@ -54,6 +54,11 @@ EOF
         ;;
     disable)
         rm -f "$RULE" "$MODLOAD"
+        if [ -n "$TARGET_USER" ]; then
+            # same prompt removes the background-permission rule, so the app's
+            # Uninstall does not have to ask for the password a second time
+            rm -f "/etc/polkit-1/rules.d/90-input-remapper-${TARGET_USER}.rules"
+        fi
         reload_udev
         echo "Device access disabled (group membership left untouched)."
         ;;

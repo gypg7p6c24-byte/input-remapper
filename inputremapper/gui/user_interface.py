@@ -20,6 +20,7 @@
 
 """User Interface."""
 import os
+import shutil
 import tempfile
 import subprocess
 import threading
@@ -800,25 +801,20 @@ class UserInterface:
         if response != Gtk.ResponseType.ACCEPT:
             return False
 
-        cmd = [
-            "pkexec",
-            "input-remapper-control",
-            "--command",
-            "uninstall",
-        ]
-        if remove_config:
-            cmd.append("--remove-config")
+        logger.info("Settings uninstall requested remove_config=%s", remove_config)
+        try:
+            if is_flatpak():
+                error = self._uninstall_flatpak(remove_config)
+            else:
+                error = self._uninstall_native(remove_config)
+        except OSError as exception:
+            # pkexec/flatpak-spawn missing: without this the exception would die
+            # inside this idle callback and the button would do nothing at all.
+            logger.error("Uninstall crashed: %s", exception, exc_info=True)
+            error = str(exception)
 
-        logger.info(
-            "Settings uninstall requested remove_config=%s command=%s",
-            remove_config,
-            cmd,
-        )
-        env = os.environ.copy()
-        env.update(monitor_env_vars())
-        exit_code = subprocess.call(cmd, env=env)
-        if exit_code != 0:
-            logger.warning("Uninstall command failed with code %s", exit_code)
+        if error is not None:
+            logger.warning("Uninstall failed: %s", error)
             error_dialog = Gtk.MessageDialog(
                 self.window,
                 Gtk.DialogFlags.MODAL | Gtk.DialogFlags.DESTROY_WITH_PARENT,
@@ -826,9 +822,7 @@ class UserInterface:
                 Gtk.ButtonsType.CLOSE,
                 _("Uninstall failed"),
             )
-            error_dialog.format_secondary_text(
-                _("Could not complete uninstall. Please check the logs for details.")
-            )
+            error_dialog.format_secondary_text(error)
             error_dialog.run()
             error_dialog.hide()
             return False
@@ -836,6 +830,68 @@ class UserInterface:
         logger.info("Uninstall command completed successfully")
         self.controller.close()
         return False
+
+    def _uninstall_run(self, cmd, capture: bool = False) -> Optional[str]:
+        """Run one uninstall step. Returns an error message, or None on success.
+
+        `capture` is off for the pkexec steps: a terminal polkit agent prompts on
+        the streams, so they stay inherited there.
+        """
+        logger.info("Uninstall step `%s`", " ".join(cmd))
+        env = os.environ.copy()
+        env.update(monitor_env_vars())
+        result = subprocess.run(cmd, env=env, capture_output=capture, text=True)
+        if result.returncode == 0:
+            return None
+        # show what the host actually said, e.g. "is installed in both user and
+        # system installations", which a bare exit code would hide
+        detail = (result.stderr or result.stdout or "").strip() if capture else ""
+        return f"{' '.join(cmd[:3])}: {detail or _('exit code ') + str(result.returncode)}"
+
+    def _uninstall_native(self, remove_config: bool) -> Optional[str]:
+        cmd = ["pkexec", "input-remapper-control", "--command", "uninstall"]
+        if remove_config:
+            cmd.append("--remove-config")
+        return self._uninstall_run(cmd)
+
+    def _uninstall_flatpak(self, remove_config: bool) -> Optional[str]:
+        """Drop the host permissions, then let the host uninstall the bundle.
+
+        pkexec and dpkg do not exist inside the sandbox, so the native path is
+        unusable here: both steps run on the host through flatpak-spawn.
+        """
+        helper = flatpak_host_helper("input-remapper-device-access")
+        if not helper:
+            return _("Could not locate the host helper inside the Flatpak.")
+
+        # one password prompt: "disable" drops the udev rule and the polkit rule
+        error = self._uninstall_run(
+            ["flatpak-spawn", "--host", "pkexec", helper, "disable", UserUtils.user]
+        )
+        if error is not None:
+            return error
+
+        if remove_config:
+            # the presets live on the host, shared into the sandbox by
+            # --filesystem=~/.config/input-remapper-2, so plain removal works
+            shutil.rmtree(
+                os.path.join(UserUtils.home, ".config", "input-remapper-2"),
+                ignore_errors=True,
+            )
+
+        app_id = os.environ.get("FLATPAK_ID", "io.github.sezanzeb.input_remapper")
+        return self._uninstall_run(
+            [
+                "flatpak-spawn",
+                "--host",
+                "flatpak",
+                "uninstall",
+                "--noninteractive",
+                "-y",
+                app_id,
+            ],
+            capture=True,
+        )
 
     def on_gtk_settings_uninstall_clicked(self, *_):
         """Glade signal fallback for the uninstall button."""
