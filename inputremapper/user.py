@@ -95,6 +95,19 @@ def flatpak_host_app_path() -> str:
         return ""
 
 
+def flatpak_installation_scope() -> str:
+    """"--user" or "--system": where THIS instance is installed on the host.
+
+    Installing an update into the wrong scope leaves two installations side by
+    side, and the one that is not running silently stops being updated. Anything
+    that is not clearly a system install is treated as a user install, which is
+    what every bundle installed from the app itself is.
+    """
+    if flatpak_host_app_path().startswith("/var/lib/flatpak"):
+        return "--system"
+    return "--user"
+
+
 def flatpak_host_helper(name: str) -> str:
     """Host path of a helper shipped in the Flatpak's bin directory."""
     app_path = flatpak_host_app_path()

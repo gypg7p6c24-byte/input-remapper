@@ -75,10 +75,23 @@ class SymbolNotAvailableInTargetError(ValueError):
 
 class OutputSymbolUnknownError(ValueError):
     def __init__(self, symbol: str):
-        super().__init__(
+        message = (
             f'The output_symbol "{symbol}" is not a macro and not a valid '
             + "keycode-name"
         )
+
+        if len(symbol) == 1:
+            # a character typed as-is that the layout could not resolve: say
+            # which of the two reasons it is, and what to type instead
+            if keyboard_layout.get_character(symbol) is None:
+                message += (
+                    f'. "{symbol}" is not typable on the keyboard layout that '
+                    "was read, so use the name of the key instead, like KEY_M"
+                )
+            else:
+                message += ". Its key has no name on this layout"
+
+        super().__init__(message)
 
 
 class MacroButTypeOrCodeSetError(ValueError):

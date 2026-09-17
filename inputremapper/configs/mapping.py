@@ -398,13 +398,30 @@ class Mapping(UIMapping):
         if symbol == DISABLE_NAME:
             return values
 
-        if Parser.is_this_a_macro(symbol):
+        # a single character is never a macro, but "+" would look like one
+        if len(symbol) > 1 and Parser.is_this_a_macro(symbol):
             mapping_mock = namedtuple("Mapping", values.keys())(**values)
             # raises MacroError
             Parser.parse(symbol, mapping=mapping_mock, verbose=False)
             return values
 
         code = keyboard_layout.get(symbol)
+
+        if code is None and len(symbol) == 1:
+            # A character typed as-is, like "," or "e" with an accent. Only the
+            # symbol NAMES are in the layout table, so resolve the character
+            # through the layout and store what it resolves to.
+            resolved = keyboard_layout.symbol_for_character(symbol)
+            if resolved is not None:
+                logger.debug('Resolved output_symbol "%s" to "%s"', symbol, resolved)
+                values["output_symbol"] = resolved
+                symbol = resolved
+                if Parser.is_this_a_macro(symbol):
+                    mapping_mock = namedtuple("Mapping", values.keys())(**values)
+                    Parser.parse(symbol, mapping=mapping_mock, verbose=False)
+                    return values
+                code = keyboard_layout.get(symbol)
+
         if code is None:
             raise OutputSymbolUnknownError(symbol)
 

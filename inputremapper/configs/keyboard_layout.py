@@ -195,10 +195,13 @@ class KeyboardLayout:
         """Persist name->code so the systemd service knows the session symbols."""
         # The service that runs via systemd can't read the user session's layout.
         path = PathUtils.get_config_path(XMODMAP_FILENAME)
-        PathUtils.touch(path)
-        with open(path, "w") as file:
-            logger.debug('Writing "%s"', path)
-            json.dump(symbols, file, indent=4)
+        try:
+            PathUtils.touch(path)
+            with open(path, "w") as file:
+                logger.debug('Writing "%s"', path)
+                json.dump(symbols, file, indent=4)
+        except OSError as error:
+            logger.error('Could not write "%s": %s', path, error)
 
     def _learn_characters(self) -> None:
         """Learn which key and modifiers produce each printable character.
@@ -264,10 +267,13 @@ class KeyboardLayout:
 
     def _write_characters_cache(self, characters: dict) -> None:
         path = PathUtils.get_config_path(CHARACTERS_FILENAME)
-        PathUtils.touch(path)
-        with open(path, "w") as file:
-            logger.debug('Writing "%s"', path)
-            json.dump(characters, file, indent=4)
+        try:
+            PathUtils.touch(path)
+            with open(path, "w") as file:
+                logger.debug('Writing "%s"', path)
+                json.dump(characters, file, indent=4)
+        except OSError as error:
+            logger.error('Could not write "%s": %s', path, error)
 
     def _read_characters_cache(self) -> dict:
         path = PathUtils.get_config_path(CHARACTERS_FILENAME)
@@ -290,6 +296,35 @@ class KeyboardLayout:
         code, modifiers = entry[0], list(entry[1])
         return int(code), modifiers
 
+    # The layout reports modifiers under their X keysym name, which only exists
+    # when a session layout could be read. The evdev names always exist.
+    EVDEV_MODIFIERS = {
+        "Shift_L": "KEY_LEFTSHIFT",
+        "ISO_Level3_Shift": "KEY_RIGHTALT",
+    }
+
+    def symbol_for_character(self, character: str) -> Optional[str]:
+        """Turn a character typed as-is into an output_symbol of this layout.
+
+        "," on an AZERTY layout is the physical QWERTY "m" key, so it becomes
+        "KEY_M"; a character that needs a level, like "e" with an accent,
+        becomes the macro that holds the modifiers down.
+        """
+        resolved = self.get_character(character)
+        if resolved is None:
+            return None
+
+        code, modifiers = resolved
+        name = self.get_name(code)
+        if name is None:
+            return None
+
+        symbol = f"key({name})" if modifiers else name
+        for modifier in reversed(modifiers):
+            symbol = f"modify({self.EVDEV_MODIFIERS.get(modifier, modifier)}, {symbol})"
+
+        return symbol
+
     def _use_linux_evdev_symbols(self):
         """Look up the evdev constant names and use them."""
         for name, ecode in evdev.ecodes.ecodes.items():
@@ -301,19 +336,29 @@ class KeyboardLayout:
         logger.debug("Gathering available keycodes")
         self.clear()
 
-        if not is_service():
-            # xmodmap is only available from within the login session.
-            # The service that runs via systemd can't use this.
-            # On Wayland xmodmap is unavailable; fall back to GTK's keymap.
-            if not self._use_xmodmap_symbols():
-                self._use_gdk_symbols()
-            self._learn_characters()
-        else:
-            self._characters = self._read_characters_cache()
-
+        # First, because it is the only source that cannot fail: the evdev
+        # constants are compiled in. Anything below reads the session's layout
+        # and may raise (no display, no xmodmap, an unwritable config dir). An
+        # exception escaping populate leaves _mapping half-filled forever -
+        # __getattribute__ only triggers populate while the attribute is still
+        # LAZY_LOAD, and it no longer is - so KEY_M and friends would silently
+        # stay missing for the rest of the session.
         self._use_linux_evdev_symbols()
-
         self._set(DISABLE_NAME, DISABLE_CODE)
+
+        try:
+            if not is_service():
+                # xmodmap is only available from within the login session.
+                # The service that runs via systemd can't use this.
+                # On Wayland xmodmap is unavailable; fall back to GTK's keymap.
+                if not self._use_xmodmap_symbols():
+                    self._use_gdk_symbols()
+                self._learn_characters()
+            else:
+                self._characters = self._read_characters_cache()
+        except Exception as error:
+            # say it out loud: without the layout, only evdev names (KEY_M) work
+            logger.error("Could not read the keyboard layout: %s", error, exc_info=True)
 
     def update(self, mapping: dict):
         """Update this with new keys.

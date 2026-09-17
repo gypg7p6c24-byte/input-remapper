@@ -111,7 +111,12 @@ from inputremapper.update_service import (
     fetch_release,
     release_page_for_channel,
 )
-from inputremapper.user import UserUtils, is_flatpak, flatpak_host_helper
+from inputremapper.user import (
+    UserUtils,
+    is_flatpak,
+    flatpak_host_helper,
+    flatpak_installation_scope,
+)
 
 # https://cjenkins.wordpress.com/2012/05/08/use-gtksourceview-widget-in-glade/
 GObject.type_register(GtkSource.View)
@@ -640,7 +645,10 @@ class UserInterface:
                 "--host",
                 "flatpak",
                 "install",
-                "--user",
+                # install where this instance already lives: a bundle installed
+                # system-wide (Discover) updated with --user would leave a
+                # second, stale installation behind
+                flatpak_installation_scope(),
                 "--noninteractive",
                 "--reinstall",
                 "-y",
@@ -886,6 +894,7 @@ class UserInterface:
                 "--host",
                 "flatpak",
                 "uninstall",
+                flatpak_installation_scope(),
                 "--noninteractive",
                 "-y",
                 app_id,
