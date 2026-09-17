@@ -176,6 +176,15 @@ def _asset_version_from_name(asset_name: str) -> str | None:
     return match.group("version")
 
 
+def _asset_version_key(asset: Any) -> tuple[int, int, int, int, int]:
+    """Order assets by the version carried in their name.
+
+    Unparseable names sort last, so a real version always wins over them.
+    """
+    name = str(asset.get("name", "")) if isinstance(asset, dict) else ""
+    return parse_version(_asset_version_from_name(name) or "") or (0, 0, 0, 0, 0)
+
+
 def _preferred_asset_suffixes() -> tuple[str, ...]:
     """On SteamOS/Flatpak prefer the .flatpak bundle; otherwise the .deb."""
     if is_flatpak():
@@ -191,17 +200,19 @@ def fetch_release(channel: str) -> UpdateRelease:
 
     selected = None
     for suffix in _preferred_asset_suffixes():
-        selected = next(
-            (
-                asset
-                for asset in assets
-                if isinstance(asset, dict)
-                and str(asset.get("name", "")).endswith(suffix)
-                and asset.get("browser_download_url")
-            ),
-            None,
-        )
-        if selected is not None:
+        matching = [
+            asset
+            for asset in assets
+            if isinstance(asset, dict)
+            and str(asset.get("name", "")).endswith(suffix)
+            and asset.get("browser_download_url")
+        ]
+        if matching:
+            # A rolling release accumulates: every build has its own version, so
+            # a new bundle no longer replaces the previous one by name. Taking
+            # the first asset would offer whichever build happens to be listed
+            # first, which is the oldest one still attached.
+            selected = max(matching, key=_asset_version_key)
             break
     if selected is None:
         wanted = "/".join(_preferred_asset_suffixes())

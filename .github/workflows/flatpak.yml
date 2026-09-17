@@ -71,6 +71,24 @@ jobs:
           manifest-path: install/flatpak/io.github.sezanzeb.input_remapper.yml
           cache-key: flatpak-builder-${{ github.sha }}
 
+      # Each build now has its own asset name, so a new bundle no longer
+      # replaces the previous one by name: without this the rolling release
+      # would accumulate every build ever made, and the updater would have to
+      # choose among them.
+      - name: Drop the assets left by the previous dev build
+        if: github.ref == 'refs/heads/dev' || github.event_name == 'workflow_dispatch'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release view dev-latest --json assets --jq '.assets[].name' \
+            2>/dev/null > stale-assets.txt || true
+          while read -r asset; do
+            [ -n "$asset" ] || continue
+            echo "removing stale asset ${asset}"
+            gh release delete-asset dev-latest "$asset" -y
+          done < stale-assets.txt
+          rm -f stale-assets.txt
+
       - name: Publish rolling dev-latest release
         if: github.ref == 'refs/heads/dev' || github.event_name == 'workflow_dispatch'
         uses: softprops/action-gh-release@v2

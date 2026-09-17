@@ -59,6 +59,36 @@ class TestUpdateService(unittest.TestCase):
         self.assertTrue(build.is_newer_than("1.0.0"))
         self.assertFalse(build.differs_from("1.0.1.dev43"))
 
+    def test_the_newest_bundle_wins_over_one_left_by_an_earlier_build(self):
+        """A rolling release can still carry the previous build's bundle.
+
+        Since every build has its own version, a new bundle no longer replaces
+        the previous one by name. Picking the first asset listed would offer an
+        older build than the one just published.
+        """
+        payload = {
+            "name": "1.0.1.dev7",
+            "html_url": "https://example.invalid/release",
+            "assets": [
+                {
+                    "name": "input-remapper-1.0.0.flatpak",
+                    "browser_download_url": "https://example.invalid/old.flatpak",
+                },
+                {
+                    "name": "input-remapper-1.0.1.dev7.flatpak",
+                    "browser_download_url": "https://example.invalid/new.flatpak",
+                },
+            ],
+        }
+        with patch(
+            "inputremapper.update_service._http_get_json", return_value=payload
+        ), patch("inputremapper.update_service.is_flatpak", return_value=True):
+            release = fetch_release("dev")
+
+        self.assertEqual(release.asset_name, "input-remapper-1.0.1.dev7.flatpak")
+        self.assertEqual(release.version, "1.0.1.dev7")
+        self.assertTrue(release.is_newer_than("1.0.0"))
+
     def test_fetch_release_parses_deb_asset(self):
         payload = {
             "name": "2.3.1.dev1",
