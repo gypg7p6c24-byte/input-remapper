@@ -35,7 +35,16 @@ from inputremapper.bin.process_utils import ProcessUtils
 gi.require_version("Gtk", "3.0")
 gi.require_version("GLib", "2.0")
 gi.require_version("GtkSource", "4")
-from gi.repository import Gtk
+from gi.repository import Gtk, GLib
+
+# Wayland compositors associate a window with its desktop entry by app_id, and
+# GTK derives app_id from the program name (input-remapper-gtk). Inside Flatpak
+# the exported entry is named after the app-id instead, so nothing matches and
+# Plasma falls back to the generic Wayland logo. Announce the app-id as program
+# name, before any window exists. Outside Flatpak the default already matches
+# input-remapper-gtk.desktop.
+if "FLATPAK_ID" in os.environ:
+    GLib.set_prgname(os.environ["FLATPAK_ID"])
 
 # https://github.com/Nuitka/Nuitka/issues/607#issuecomment-650217096
 Gtk.init()
@@ -149,7 +158,9 @@ class InputRemapperGtkBin:
                 fail_hard=False,
             )
             if started:
-                logger.info("Startup: reader-service started without interactive prompt")
+                logger.info(
+                    "Startup: reader-service started without interactive prompt"
+                )
             else:
                 logger.info(
                     "Startup: deferring reader-service startup "
