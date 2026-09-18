@@ -544,7 +544,7 @@ class UserInterface:
         self.controller.data_manager.set_update_channel(channel)
         self._sync_update_channel_ui(reset_release=True)
 
-    def _on_settings_update_check_clicked(self, *_):
+    def _on_settings_update_check_clicked(self, *_args):
         if self._update_busy:
             return
 
@@ -619,7 +619,7 @@ class UserInterface:
         self._set_update_busy(False, status)
         return False
 
-    def _on_settings_update_install_clicked(self, *_):
+    def _on_settings_update_install_clicked(self, *_args):
         if self._update_busy or self._update_release_info is None:
             return
 

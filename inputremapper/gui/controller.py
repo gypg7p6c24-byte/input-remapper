@@ -679,7 +679,7 @@ class Controller:
         def begin_recording():
             logger.debug("Recording Keys")
 
-            def on_recording_finished(_):
+            def on_recording_finished(_message):
                 self.message_broker.unsubscribe(on_recording_finished)
                 self.message_broker.unsubscribe(self._on_combination_recorded)
                 self.gui.connect_shortcuts()
