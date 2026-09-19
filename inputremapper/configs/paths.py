@@ -66,7 +66,12 @@ class PathUtils:
 
         PathUtils.mkdir(os.path.dirname(path), log=False)
 
-        os.mknod(path)
+        try:
+            os.mknod(path)
+        except FileExistsError:
+            # another process created it between the check and the mknod
+            return
+
         PathUtils.chown(path)
 
     @staticmethod
@@ -86,7 +91,7 @@ class PathUtils:
         base = os.path.split(path)[0]
         PathUtils.mkdir(base, log=False)
 
-        os.makedirs(path)
+        os.makedirs(path, exist_ok=True)
         PathUtils.chown(path)
 
     @staticmethod

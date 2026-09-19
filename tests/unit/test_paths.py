@@ -19,8 +19,10 @@
 # along with input-remapper.  If not, see <https://www.gnu.org/licenses/>.
 
 
+import concurrent.futures
 import os
 import tempfile
+import threading
 import unittest
 
 from inputremapper.configs.paths import PathUtils
@@ -51,6 +53,26 @@ class TestPaths(unittest.TestCase):
             PathUtils.mkdir(path_bcde)
             self.assertTrue(os.path.exists(path_bcde))
             self.assertTrue(os.path.isdir(path_bcde))
+
+    def test_create_the_same_path_concurrently(self):
+        """The gui, the service and the reader start at the same time."""
+        with tempfile.TemporaryDirectory() as local_tmp:
+            path_abc = os.path.join(local_tmp, "a/b/c")
+            barrier = threading.Barrier(8)
+
+            def create():
+                barrier.wait()
+                PathUtils.mkdir(path_abc)
+                PathUtils.touch(os.path.join(path_abc, "pipe"))
+
+            with concurrent.futures.ThreadPoolExecutor(max_workers=8) as executor:
+                futures = [executor.submit(create) for _ in range(8)]
+                for future in futures:
+                    # raises whatever the thread raised, FileExistsError included
+                    future.result()
+
+            self.assertTrue(os.path.isdir(path_abc))
+            self.assertTrue(os.path.isfile(os.path.join(path_abc, "pipe")))
 
     def test_get_preset_path(self):
         self.assertTrue(
