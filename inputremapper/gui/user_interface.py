@@ -115,7 +115,7 @@ from inputremapper.user import (
     UserUtils,
     is_flatpak,
     flatpak_host_helper,
-    flatpak_installation_scope,
+    flatpak_scope_flags,
 )
 
 # https://cjenkins.wordpress.com/2012/05/08/use-gtksourceview-widget-in-glade/
@@ -652,21 +652,24 @@ class UserInterface:
                 UserUtils.home, ".config", "input-remapper-2", "updates"
             )
             package_path = download_release_asset(release, dest_dir=download_dir)
+            # install where this instance already lives: a bundle installed
+            # system-wide (Discover) updated with --user would leave a second,
+            # stale installation behind
             command = [
                 "flatpak-spawn",
                 "--host",
                 "flatpak",
                 "install",
-                # install where this instance already lives: a bundle installed
-                # system-wide (Discover) updated with --user would leave a
-                # second, stale installation behind
-                flatpak_installation_scope(),
-                "--noninteractive",
+                *flatpak_scope_flags(),
                 "--reinstall",
                 "-y",
                 package_path,
             ]
             env = os.environ.copy()
+            # the polkit prompt for a system-wide bundle is served by the
+            # session's agent over D-Bus, not on these streams, so they are
+            # free to be captured
+            capture = True
         else:
             package_path = download_release_asset(release)
             command = [
@@ -679,25 +682,24 @@ class UserInterface:
             ]
             env = os.environ.copy()
             env.update(monitor_env_vars())
+            # a terminal polkit agent prompts on the streams: leave them
+            # inherited, as the native uninstall does
+            capture = False
 
-        logger.info("Installing update via `%s`", " ".join(command))
-        try:
-            exit_code = subprocess.call(command, env=env)
-        finally:
-            # a successful native install removes the .deb itself; every other
-            # outcome would otherwise leave tens of MB behind on each attempt
-            try:
-                os.remove(package_path)
-            except OSError:
-                pass
+        error = self._run_host_command(command, env=env, capture=capture)
 
-        if exit_code != 0:
-            GLib.idle_add(
-                self._on_update_install_failed,
-                release.channel,
-                _("Installer exited with code ") + str(exit_code),
-            )
+        if error is not None:
+            # the bundle stays on disk: an install that failed has to remain
+            # diagnosable and replayable, which a silent cleanup prevented
+            GLib.idle_add(self._on_update_install_failed, release.channel, error)
             return
+
+        # a successful native install removes the .deb itself; the flatpak
+        # bundle would otherwise leave tens of MB behind on each update
+        try:
+            os.remove(package_path)
+        except OSError:
+            pass
 
         GLib.idle_add(self._on_update_install_complete, release)
 
@@ -863,28 +865,40 @@ class UserInterface:
         self.controller.close()
         return False
 
-    def _uninstall_run(self, cmd, capture: bool = False) -> Optional[str]:
-        """Run one uninstall step. Returns an error message, or None on success.
+    def _run_host_command(self, cmd, env=None, capture: bool = False) -> Optional[str]:
+        """Run one host command. Returns an error message, or None on success.
+
+        Single point where install and uninstall reach the host, so what the
+        host says is reported once instead of per button.
 
         `capture` is off for the pkexec steps: a terminal polkit agent prompts on
         the streams, so they stay inherited there.
         """
-        logger.info("Uninstall step `%s`", " ".join(cmd))
-        env = os.environ.copy()
-        env.update(monitor_env_vars())
+        logger.info("Host command `%s`", " ".join(cmd))
+        if env is None:
+            env = os.environ.copy()
+            env.update(monitor_env_vars())
         result = subprocess.run(cmd, env=env, capture_output=capture, text=True)
         if result.returncode == 0:
             return None
-        # show what the host actually said, e.g. "is installed in both user and
-        # system installations", which a bare exit code would hide
+        # show what the host actually said, e.g. "InstallBundle not allowed for
+        # user" or "is installed in both user and system installations", which a
+        # bare exit code hides — it could only be read by relaunching from a
+        # terminal
         detail = (result.stderr or result.stdout or "").strip() if capture else ""
+        logger.error(
+            "Host command `%s` failed with code %s: %s",
+            " ".join(cmd),
+            result.returncode,
+            detail or "<no output captured>",
+        )
         return f"{' '.join(cmd[:3])}: {detail or _('exit code ') + str(result.returncode)}"
 
     def _uninstall_native(self, remove_config: bool) -> Optional[str]:
         cmd = ["pkexec", "input-remapper-control", "--command", "uninstall"]
         if remove_config:
             cmd.append("--remove-config")
-        return self._uninstall_run(cmd)
+        return self._run_host_command(cmd)
 
     def _uninstall_flatpak(self, remove_config: bool) -> Optional[str]:
         """Drop the host permissions, then let the host uninstall the bundle.
@@ -897,7 +911,7 @@ class UserInterface:
             return _("Could not locate the host helper inside the Flatpak.")
 
         # one password prompt: "disable" drops the udev rule and the polkit rule
-        error = self._uninstall_run(
+        error = self._run_host_command(
             ["flatpak-spawn", "--host", "pkexec", helper, "disable", UserUtils.user]
         )
         if error is not None:
@@ -912,14 +926,13 @@ class UserInterface:
             )
 
         app_id = os.environ.get("FLATPAK_ID", "io.github.sezanzeb.input_remapper")
-        return self._uninstall_run(
+        return self._run_host_command(
             [
                 "flatpak-spawn",
                 "--host",
                 "flatpak",
                 "uninstall",
-                flatpak_installation_scope(),
-                "--noninteractive",
+                *flatpak_scope_flags(),
                 "-y",
                 app_id,
             ],

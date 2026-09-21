@@ -24,6 +24,7 @@
 import getpass
 import os
 import pwd
+from typing import List
 
 
 class UserUtils:
@@ -106,6 +107,23 @@ def flatpak_installation_scope() -> str:
     if flatpak_host_app_path().startswith("/var/lib/flatpak"):
         return "--system"
     return "--user"
+
+
+def flatpak_scope_flags() -> List[str]:
+    """Scope flags for a host `flatpak install`/`uninstall` of this instance.
+
+    --noninteractive is deliberately omitted in system scope: installing or
+    removing a bundle system-wide is a privileged operation served by
+    flatpak-system-helper behind polkit, and --noninteractive forbids flatpak
+    from asking for that authorization. polkit then refuses outright ("operation
+    not allowed for user", exit code 1) instead of showing the session's
+    password prompt. In user scope nothing is privileged, so the flag stays and
+    the update remains silent.
+    """
+    scope = flatpak_installation_scope()
+    if scope == "--system":
+        return [scope]
+    return [scope, "--noninteractive"]
 
 
 def flatpak_host_helper(name: str) -> str:
