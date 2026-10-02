@@ -75,14 +75,21 @@ class Pipe:
             if os.path.islink(paths[1]):
                 os.remove(paths[1])
 
-            self._fds = os.pipe()
+            fds = os.pipe()
             fds_dir = f"/proc/{os.getpid()}/fd/"
-            PathUtils.chown(f"{fds_dir}{self._fds[0]}")
-            PathUtils.chown(f"{fds_dir}{self._fds[1]}")
+            PathUtils.chown(f"{fds_dir}{fds[0]}")
+            PathUtils.chown(f"{fds_dir}{fds[1]}")
 
             # to make it accessible by path constants, create symlinks
-            os.symlink(f"{fds_dir}{self._fds[0]}", paths[0])
-            os.symlink(f"{fds_dir}{self._fds[1]}", paths[1])
+            try:
+                os.symlink(f"{fds_dir}{fds[0]}", paths[0])
+                os.symlink(f"{fds_dir}{fds[1]}", paths[1])
+            except FileExistsError:
+                # Another process created them between the check and here.
+                # Theirs win, use those.
+                logger.debug("Pipes %s were created concurrently", paths)
+                os.close(fds[0])
+                os.close(fds[1])
         else:
             logger.debug("Using existing pipes %s", paths)
 

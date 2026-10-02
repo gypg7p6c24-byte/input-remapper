@@ -22,9 +22,11 @@
 from __future__ import annotations
 
 import atexit
+import fcntl
 import os
 import subprocess
 import sys
+import tempfile
 from argparse import ArgumentParser
 from typing import Tuple
 
@@ -64,6 +66,9 @@ from inputremapper.gui.reader_client import ReaderClient
 from inputremapper.configs.global_config import GlobalConfig
 from inputremapper.configs.migrations import Migrations
 
+# Kept open so the lock lives as long as the process.
+_instance_lock = None
+
 
 class InputRemapperGtkBin:
     @staticmethod
@@ -79,6 +84,31 @@ class InputRemapperGtkBin:
         dialog.format_secondary_text(details)
         dialog.run()
         dialog.destroy()
+
+    @staticmethod
+    def _acquire_single_instance_lock() -> bool:
+        """Take the GUI lock for the lifetime of the process. False if held."""
+        global _instance_lock
+        if _instance_lock is not None:
+            return True
+
+        flatpak_id = os.environ.get("FLATPAK_ID")
+        runtime_dir = os.environ.get("XDG_RUNTIME_DIR")
+        if flatpak_id and runtime_dir:
+            # The sandbox shares this directory between instances of the app.
+            folder = os.path.join(runtime_dir, "app", flatpak_id)
+        else:
+            folder = os.path.join(
+                tempfile.gettempdir(), f"input-remapper-{os.getuid()}"
+            )
+        os.makedirs(folder, exist_ok=True)
+
+        _instance_lock = open(os.path.join(folder, "gui.lock"), "w")
+        try:
+            fcntl.flock(_instance_lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            return False
+        return True
 
     @staticmethod
     def _background_permission_allowed_non_interactive() -> bool:
@@ -123,6 +153,12 @@ class InputRemapperGtkBin:
             logger.update_verbosity(options.debug)
             logger.log_info("input-remapper-gtk")
             logger.debug("Using locale directory: {}".format(LOCALE_DIR))
+
+            # Login can start the GUI twice in the same second (XDG autostart and
+            # session restore). Only the first one goes on.
+            if not InputRemapperGtkBin._acquire_single_instance_lock():
+                logger.info("Another input-remapper GUI is already starting, exiting")
+                sys.exit(0)
 
             global_uinputs = GlobalUInputs(FrontendUInput)
 

@@ -24,6 +24,7 @@ import os
 import select
 import time
 import unittest
+from unittest.mock import patch
 
 from inputremapper.ipc.pipe import Pipe
 from inputremapper.ipc.shared_dict import SharedDict
@@ -146,6 +147,24 @@ class TestPipe(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(p1.recv(), 3)
         self.assertFalse(p1.poll())
         self.assertEqual(p1.recv(), None)
+
+    def test_pipe_created_concurrently(self):
+        path = os.path.join(tmp, "pipe")
+        real_symlink = os.symlink
+
+        def other_process_wins(src, dst):
+            # the competitor links its own fds first, then ours collides
+            other = os.pipe()
+            real_symlink(f"/proc/{os.getpid()}/fd/{other[0]}", f"{path}r")
+            real_symlink(f"/proc/{os.getpid()}/fd/{other[1]}", f"{path}w")
+            raise FileExistsError(17, "File exists", dst)
+
+        with patch.object(os, "symlink", other_process_wins):
+            p1 = Pipe(path)
+
+        p2 = Pipe(path)
+        p1.send(1)
+        self.assertEqual(p2.recv(), 1)
 
     def test_pipe_duo(self):
         p1 = Pipe(os.path.join(tmp, "pipe"))
