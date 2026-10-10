@@ -292,9 +292,7 @@ class UserInterface:
         )
         RecordingStatus(message_broker, self.get("recording_status"))
         AutoloadSwitch(message_broker, controller, self.get("preset_autoload_switch"))
-        LinkGameDropdown(
-            message_broker, controller, self.get("preset_game_link_combo")
-        )
+        LinkGameDropdown(message_broker, controller, self.get("preset_game_link_combo"))
         GameAutoSwitcher(controller.data_manager, message_broker)
         ReleaseCombinationSwitch(
             message_broker, controller, self.get("release-combination-switch")
@@ -491,11 +489,15 @@ class UserInterface:
         autostart_enabled = self.get_autostart_enabled()
         autohide_enabled = self.get_autostart_hidden()
 
-        with HandlerDisabled(self._settings_autostart_switch, self._on_settings_autostart_toggled):
+        with HandlerDisabled(
+            self._settings_autostart_switch, self._on_settings_autostart_toggled
+        ):
             self._settings_autostart_switch.set_active(autostart_enabled)
 
         if self._settings_autohide_switch is not None:
-            with HandlerDisabled(self._settings_autohide_switch, self._on_settings_autohide_toggled):
+            with HandlerDisabled(
+                self._settings_autohide_switch, self._on_settings_autohide_toggled
+            ):
                 self._settings_autohide_switch.set_active(
                     autohide_enabled if autostart_enabled else False
                 )
@@ -504,7 +506,9 @@ class UserInterface:
     def _selected_update_channel(self) -> str:
         if self._settings_update_channel_combo is None:
             return "stable"
-        return "dev" if self._settings_update_channel_combo.get_active() == 1 else "stable"
+        return (
+            "dev" if self._settings_update_channel_combo.get_active() == 1 else "stable"
+        )
 
     def _set_update_status(self, text: str) -> None:
         if self._settings_update_status_label is not None:
@@ -513,7 +517,9 @@ class UserInterface:
     def _sync_update_channel_ui(self, reset_release: bool = False) -> None:
         channel = self._selected_update_channel()
         if self._settings_update_release_link is not None:
-            self._settings_update_release_link.set_uri(release_page_for_channel(channel))
+            self._settings_update_release_link.set_uri(
+                release_page_for_channel(channel)
+            )
 
         if reset_release:
             self._update_release_info = None
@@ -521,9 +527,7 @@ class UserInterface:
                 self._settings_update_available_version.set_text(_("Not checked yet"))
             if self._settings_update_install_button is not None:
                 self._settings_update_install_button.set_sensitive(False)
-            self._set_update_status(
-                _("Ready. Check the selected channel for updates.")
-            )
+            self._set_update_status(_("Ready. Check the selected channel for updates."))
 
     def _set_update_busy(self, busy: bool, status: str) -> None:
         self._update_busy = busy
@@ -727,7 +731,9 @@ class UserInterface:
 
         self._set_update_busy(
             False,
-            _("Update installed. Input Remapper will now close so you can relaunch the new version."),
+            _(
+                "Update installed. Input Remapper will now close so you can relaunch the new version."
+            ),
         )
         dialog = Gtk.MessageDialog(
             self.window,
@@ -892,7 +898,9 @@ class UserInterface:
             result.returncode,
             detail or "<no output captured>",
         )
-        return f"{' '.join(cmd[:3])}: {detail or _('exit code ') + str(result.returncode)}"
+        return (
+            f"{' '.join(cmd[:3])}: {detail or _('exit code ') + str(result.returncode)}"
+        )
 
     def _uninstall_native(self, remove_config: bool) -> Optional[str]:
         cmd = ["pkexec", "input-remapper-control", "--command", "uninstall"]
@@ -1290,14 +1298,10 @@ class UserInterface:
             # The .desktop file is executed by the host session at login:
             # "input-remapper-gtk" does not exist there, launch through
             # flatpak instead. Requires --filesystem=~/.config/autostart.
-            app_id = os.environ.get(
-                "FLATPAK_ID", "io.github.sezanzeb.input_remapper"
-            )
+            app_id = os.environ.get("FLATPAK_ID", "io.github.sezanzeb.input_remapper")
             exec_cmd = f"flatpak run {app_id}"
             if hidden:
-                exec_cmd = (
-                    f"flatpak run --env=INPUT_REMAPPER_START_HIDDEN=1 {app_id}"
-                )
+                exec_cmd = f"flatpak run --env=INPUT_REMAPPER_START_HIDDEN=1 {app_id}"
             icon_name = app_id
         else:
             exec_cmd = "input-remapper-gtk"

@@ -1062,9 +1062,7 @@ class SteamProcessWatcher:
         env = self._safe_read_environ(f"/proc/{pid}/environ")
         return self._build_info(pid, exe, cwd, cmdline, env)
 
-    def _build_info(
-        self, pid, exe: str, cwd: str, cmdline: list, env: dict
-    ) -> dict:
+    def _build_info(self, pid, exe: str, cwd: str, cmdline: list, env: dict) -> dict:
         """Match one process (local or host-scanned) against known games."""
         matches = []
         cmd_text = " ".join(cmdline)
@@ -1345,9 +1343,7 @@ class GameAutoSwitcher:
                 continue
 
             if desired_preset:
-                ok = self._data_manager.start_injecting_group(
-                    group_key, desired_preset
-                )
+                ok = self._data_manager.start_injecting_group(group_key, desired_preset)
                 self._last_applied[group_key] = desired_preset
                 self._log(
                     "apply group=%s appid=%s preset=%s ok=%s",

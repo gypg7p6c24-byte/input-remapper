@@ -296,9 +296,7 @@ class DataManager:
                 self.active_group.key, self.active_preset.name
             )
             if existing:
-                self._config.set_game_binding(
-                    self.active_group.key, existing, None
-                )
+                self._config.set_game_binding(self.active_group.key, existing, None)
         else:
             self._config.set_game_binding(
                 self.active_group.key, game_id, self.active_preset.name

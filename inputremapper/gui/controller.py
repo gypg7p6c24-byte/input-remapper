@@ -697,7 +697,10 @@ class Controller:
                 if self._recording_combination_dirty:
                     self._recording_combination_dirty = False
                     active_mapping = self.data_manager.active_mapping
-                    if active_mapping is not None and active_mapping.get_error() is None:
+                    if (
+                        active_mapping is not None
+                        and active_mapping.get_error() is None
+                    ):
                         self.save()
 
                 # Clear the "Pausing injection..." status once recording ends.

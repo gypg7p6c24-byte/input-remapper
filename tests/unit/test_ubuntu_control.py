@@ -16,7 +16,9 @@ class TestUbuntuControl(unittest.TestCase):
 
     def _parse_control_list(self, field_name):
         line = next(
-            line for line in self.control.splitlines() if line.startswith(f"{field_name}:")
+            line
+            for line in self.control.splitlines()
+            if line.startswith(f"{field_name}:")
         )
         return [entry.strip() for entry in line.split(":", 1)[1].split(",")]
 

@@ -62,7 +62,9 @@ def monitor_log_path() -> str:
     if path:
         return os.path.abspath(os.path.expanduser(path))
 
-    xdg_config_home = os.getenv("XDG_CONFIG_HOME", os.path.join(UserUtils.home, ".config"))
+    xdg_config_home = os.getenv(
+        "XDG_CONFIG_HOME", os.path.join(UserUtils.home, ".config")
+    )
     return os.path.join(
         xdg_config_home,
         "input-remapper-2",
@@ -76,11 +78,7 @@ def monitor_env_prefix() -> str:
         return ""
 
     path = monitor_log_path()
-    return (
-        "env "
-        f"{MONITOR_ENV}=1 "
-        f"{MONITOR_PATH_ENV}={shlex.quote(path)} "
-    )
+    return "env " f"{MONITOR_ENV}=1 " f"{MONITOR_PATH_ENV}={shlex.quote(path)} "
 
 
 def monitor_env_vars() -> dict[str, str]:

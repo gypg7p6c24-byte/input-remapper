@@ -257,7 +257,9 @@ class TestInjector(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(updated.type, EV_KEY)
         self.assertEqual(updated.code, BTN_DPAD_LEFT)
         self.assertIsNone(updated.analog_threshold)
-        self.assertEqual(updated.origin_hash, fixtures["/dev/input/event200"].get_device_hash())
+        self.assertEqual(
+            updated.origin_hash, fixtures["/dev/input/event200"].get_device_hash()
+        )
 
     def test_forward_gamepad_events(self):
         device_hash = fixtures.gamepad.get_device_hash()

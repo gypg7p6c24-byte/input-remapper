@@ -38,9 +38,9 @@ from inputremapper.user import is_flatpak
 # shape under /api/v1/repos/<owner>/<repo>.
 FORGE_OWNER = os.environ.get("INPUT_REMAPPER_FORGE_OWNER", "gypg7p6c24-byte")
 FORGE_REPO = os.environ.get("INPUT_REMAPPER_FORGE_REPO", "input-remapper")
-FORGE_WEB_URL = os.environ.get(
-    "INPUT_REMAPPER_FORGE_URL", "https://github.com"
-).rstrip("/")
+FORGE_WEB_URL = os.environ.get("INPUT_REMAPPER_FORGE_URL", "https://github.com").rstrip(
+    "/"
+)
 FORGE_API_URL = os.environ.get(
     "INPUT_REMAPPER_FORGE_API_URL", "https://api.github.com"
 ).rstrip("/")
@@ -54,8 +54,12 @@ CHANNEL_RELEASE_TAGS = {
     "dev": "dev-latest",
 }
 DEBIAN_VERSION_RE = re.compile(r"^input-remapper-(?P<version>.+)\.deb$")
-FLATPAK_VERSION_RE = re.compile(r"^input-remapper-(?P<version>.+)\.(?:flatpak|flatpakref)$")
-VERSION_RE = re.compile(r"^(?P<major>\d+)\.(?P<minor>\d+)\.(?P<patch>\d+)(?:\.dev(?P<dev>\d+))?$")
+FLATPAK_VERSION_RE = re.compile(
+    r"^input-remapper-(?P<version>.+)\.(?:flatpak|flatpakref)$"
+)
+VERSION_RE = re.compile(
+    r"^(?P<major>\d+)\.(?P<minor>\d+)\.(?P<patch>\d+)(?:\.dev(?P<dev>\d+))?$"
+)
 
 
 class UpdateError(RuntimeError):
@@ -262,9 +266,10 @@ def download_release_asset(release: UpdateRelease, dest_dir: str | None = None) 
         },
     )
     try:
-        with request.urlopen(req, timeout=120) as response, open(
-            target_path, "wb"
-        ) as output:
+        with (
+            request.urlopen(req, timeout=120) as response,
+            open(target_path, "wb") as output,
+        ):
             shutil.copyfileobj(response, output)
     except Exception as exc:
         try:

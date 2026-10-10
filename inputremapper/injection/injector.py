@@ -32,7 +32,14 @@ from multiprocessing.connection import Connection
 from typing import Dict, List, Optional, Tuple, Union
 
 import evdev
-from evdev.ecodes import ABS_HAT0X, ABS_HAT0Y, BTN_DPAD_DOWN, BTN_DPAD_LEFT, BTN_DPAD_RIGHT, BTN_DPAD_UP
+from evdev.ecodes import (
+    ABS_HAT0X,
+    ABS_HAT0Y,
+    BTN_DPAD_DOWN,
+    BTN_DPAD_LEFT,
+    BTN_DPAD_RIGHT,
+    BTN_DPAD_UP,
+)
 
 from inputremapper.configs.input_config import InputCombination, InputConfig
 from inputremapper.configs.preset import Preset
@@ -272,9 +279,11 @@ class Injector(multiprocessing.Process):
         if (
             input_config.type == evdev.ecodes.EV_ABS
             and input_config.analog_threshold in (-1, 1)
-            and (btn_code := DPAD_ABS_TO_KEY_EQUIVALENTS.get(
-                (input_config.code, input_config.analog_threshold)
-            ))
+            and (
+                btn_code := DPAD_ABS_TO_KEY_EQUIVALENTS.get(
+                    (input_config.code, input_config.analog_threshold)
+                )
+            )
             is not None
         ):
             equivalents.append(

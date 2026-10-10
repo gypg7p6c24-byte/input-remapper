@@ -439,7 +439,9 @@ class TestControl(unittest.TestCase):
 
         call_patch.assert_called_once()
         command = call_patch.call_args.args[0]
-        self.assertEqual(command[:4], ["apt-get", "-y", "--allow-downgrades", "install"])
+        self.assertEqual(
+            command[:4], ["apt-get", "-y", "--allow-downgrades", "install"]
+        )
         self.assertEqual(command[4], os.path.abspath(package_path))
 
     def test_install_package_requires_existing_file(self):

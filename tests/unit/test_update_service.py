@@ -22,7 +22,9 @@ class TestUpdateService(unittest.TestCase):
         self.assertEqual(normalize_version("v2.3.1"), "2.3.1")
 
     def test_release_page_for_channel(self):
-        self.assertTrue(release_page_for_channel("stable").endswith("/tag/stable-latest"))
+        self.assertTrue(
+            release_page_for_channel("stable").endswith("/tag/stable-latest")
+        )
         self.assertTrue(release_page_for_channel("dev").endswith("/tag/dev-latest"))
 
     def test_update_release_version_comparisons(self):
@@ -80,9 +82,10 @@ class TestUpdateService(unittest.TestCase):
                 },
             ],
         }
-        with patch(
-            "inputremapper.update_service._http_get_json", return_value=payload
-        ), patch("inputremapper.update_service.is_flatpak", return_value=True):
+        with (
+            patch("inputremapper.update_service._http_get_json", return_value=payload),
+            patch("inputremapper.update_service.is_flatpak", return_value=True),
+        ):
             release = fetch_release("dev")
 
         self.assertEqual(release.asset_name, "input-remapper-1.0.1.dev7.flatpak")

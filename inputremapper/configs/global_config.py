@@ -104,9 +104,7 @@ class GlobalConfig:
         bindings = self._config.get("game_bindings", {}).get(group_key, {})
         return copy.deepcopy(bindings)
 
-    def get_game_binding_for_preset(
-        self, group_key: str, preset: str
-    ) -> Optional[str]:
+    def get_game_binding_for_preset(self, group_key: str, preset: str) -> Optional[str]:
         """Get the game bound to a preset for a device."""
         bindings = self._config.get("game_bindings", {}).get(group_key, {})
         for game_id, bound_preset in bindings.items():

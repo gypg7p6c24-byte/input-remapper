@@ -81,15 +81,11 @@ def _steam_roots() -> List[str]:
         os.path.join(home, "snap", "steam", "common", ".steam", "steam"),
         os.path.join(home, "snap", "steam", "common", ".local", "share", "Steam"),
         # Flatpak Steam (Bazzite and other immutable distros)
-        os.path.join(
-            home, ".var", "app", "com.valvesoftware.Steam", ".steam", "steam"
-        ),
+        os.path.join(home, ".var", "app", "com.valvesoftware.Steam", ".steam", "steam"),
         os.path.join(
             home, ".var", "app", "com.valvesoftware.Steam", ".local", "share", "Steam"
         ),
-        os.path.join(
-            home, ".var", "app", "com.valvesoftware.Steam", "data", "Steam"
-        ),
+        os.path.join(home, ".var", "app", "com.valvesoftware.Steam", "data", "Steam"),
     ]
     return [path for path in candidates if os.path.isdir(path)]
 
