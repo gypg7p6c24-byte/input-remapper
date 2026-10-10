@@ -21,6 +21,8 @@
 import json
 import os
 import subprocess
+import sys
+import types
 import unittest
 from unittest.mock import patch
 
@@ -159,6 +161,46 @@ class TestSystemMapping(unittest.TestCase):
             # testing for BTN_LEFT is especially important, because
             # `evdev.ecodes.BTN.get(code)` returns an array of ['BTN_LEFT', 'BTN_MOUSE']
             self.assertEqual(keyboard_layout.get_name(BTN_LEFT), "BTN_LEFT")
+
+    def test_gdk_layout_read_after_sync(self):
+        # before the compositor answered, Gdk only knows the default US keymap
+        state = {"synced": False}
+        evdev_to_name = {"us": {17: "w", 30: "a"}, "fr": {17: "z", 30: "q"}}
+
+        class Display:
+            def sync(self):
+                state["synced"] = True
+
+        class Keymap:
+            def get_entries_for_keycode(self, keycode):
+                layout = "fr" if state["synced"] else "us"
+                name = evdev_to_name[layout].get(keycode - 8)
+                return (name is not None), [], [name] if name else []
+
+        class Gdk:
+            class Display:
+                get_default = staticmethod(lambda: Display())
+
+            class Keymap:
+                get_for_display = staticmethod(lambda _: Keymap())
+
+            keyval_name = staticmethod(lambda keyval: keyval)
+
+        gi = types.ModuleType("gi")
+        gi.require_version = lambda *_: None
+        repository = types.ModuleType("gi.repository")
+        repository.Gdk = Gdk
+        gi.repository = repository
+
+        with patch.dict(sys.modules, {"gi": gi, "gi.repository": repository}):
+            keyboard_layout = KeyboardLayout()
+            keyboard_layout.clear()
+            self.assertTrue(keyboard_layout._use_gdk_symbols())
+
+        self.assertEqual(keyboard_layout.get("z"), 17)
+        self.assertEqual(keyboard_layout.get("q"), 30)
+        self.assertIsNone(keyboard_layout.get("w"))
+
 
 if __name__ == "__main__":
     unittest.main()

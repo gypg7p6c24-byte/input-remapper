@@ -158,6 +158,10 @@ class KeyboardLayout:
             logger.info("No Gdk display available to read the keyboard layout")
             return False
 
+        # GTK may not have received the compositor's layout yet at startup and
+        # would answer with the default US keymap: round-trip first.
+        display.sync()
+
         keymap = Gdk.Keymap.get_for_display(display)
         if keymap is None:
             return False
@@ -224,6 +228,7 @@ class KeyboardLayout:
         display = Gdk.Display.get_default()
         if display is None:
             return
+        display.sync()  # see _use_gdk_symbols
         keymap = Gdk.Keymap.get_for_display(display)
         if keymap is None:
             return
